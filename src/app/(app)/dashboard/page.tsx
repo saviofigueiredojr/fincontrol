@@ -43,7 +43,7 @@ interface DashboardData {
   receitas: number;
   despesas: number;
   saldo: number;
-  meta: { current: number; target: number; percentage: number };
+  meta: { current: number; target: number; percentage: number; lifespan?: number };
   chartData: { competencia: string; label: string; receitas: number; despesas: number }[];
   despesasPorCategoria: { name: string; value: number }[];
   parcelasAtivas: {
@@ -156,6 +156,7 @@ function normalizeDashboardData(payload: any): DashboardData {
       current: metaCurrent,
       target: metaTarget,
       percentage: metaPercentage,
+      lifespan: toFiniteNumber(payload?.meta?.lifespan),
     },
     chartData,
     despesasPorCategoria,
@@ -328,9 +329,16 @@ export default function DashboardPage() {
               className="mt-3"
               indicatorClassName="bg-gradient-to-r from-emerald-500 to-emerald-400"
             />
-            <p className="mt-2 text-xs text-muted-foreground">
-              {formatCurrency(data.meta.current)} / {formatCurrency(data.meta.target)}
-            </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {formatCurrency(data.meta.current)} / {formatCurrency(data.meta.target)}
+              </span>
+              {data.meta.lifespan !== undefined && data.meta.lifespan < 999 && data.meta.lifespan > 0 && (
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  ~ {data.meta.lifespan} meses de fôlego
+                </span>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>

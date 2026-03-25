@@ -80,6 +80,19 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    // Get all future pending PJ receipts
+    const pendingPjReceipts = await prisma.pjReceipt.findMany({
+      where: {
+        userId: { in: memberIds },
+        competencia: { in: futureCompetencias },
+        status: { in: ["unissued", "issued", "pending"] },
+      },
+      select: {
+        competencia: true,
+        amount: true,
+      },
+    });
+
     // Get starting balance from the most recent month close (compound key)
     const currentCompetencia = futureCompetencias[0];
     const [cYear, cMonth] = currentCompetencia.split("-").map(Number);
@@ -148,6 +161,10 @@ export async function GET(request: NextRequest) {
           projectedExpense += inst.amount;
         }
       }
+
+      // Add PJ Receipts
+      const monthPj = pendingPjReceipts.filter(p => p.competencia === comp);
+      projectedIncome += monthPj.reduce((s, p) => s + p.amount, 0);
 
       // For the first month, use actual data if available
       if (index === 0 && currentMonthTxs.length > 0) {

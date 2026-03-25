@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
+import { ReserveBenchmarkService } from "@/modules/analytics/reserve-benchmark.service";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,18 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // 6. Meta de Reserva e Lifespan
+    const reserveGoal = await prisma.goal.findFirst({ where: { householdId }, orderBy: { createdAt: 'asc' } });
+    const meta = reserveGoal ? {
+      current: reserveGoal.currentAmount,
+      target: reserveGoal.targetAmount,
+      percentage: reserveGoal.targetAmount > 0 ? (reserveGoal.currentAmount / reserveGoal.targetAmount) * 100 : 0
+    } : { current: 0, target: 0, percentage: 0 };
+
+    // Calcula o lifespan baseado na média real de despesas dos últimos meses capturados no chartData
+    const last6MonthsExpenses = chartData.map(c => c.expense);
+    const lifespan = ReserveBenchmarkService.calculateLifespan(meta.current, last6MonthsExpenses);
+
     return NextResponse.json({
       totalIncome,
       totalExpense,
@@ -142,6 +155,7 @@ export async function GET(request: NextRequest) {
       topCategories,
       activeInstallments,
       budgetProgress,
+      meta: { ...meta, lifespan }
     });
   } catch (error) {
     console.error("Dashboard error:", error);
