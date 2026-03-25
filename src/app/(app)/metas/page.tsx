@@ -51,6 +51,87 @@ interface GoalData {
   }[];
 }
 
+function toFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeGoalData(payload: any): GoalData | null {
+  const raw = Array.isArray(payload)
+    ? payload[0]
+    : Array.isArray(payload?.goals)
+    ? payload.goals[0]
+    : payload?.goal ?? payload;
+
+  if (!raw || typeof raw !== "object" || !raw.id) return null;
+
+  const targetAmount = toFiniteNumber(raw.targetAmount ?? raw.target);
+  const currentAmount = toFiniteNumber(raw.currentAmount ?? raw.current);
+  const percentage = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
+  const remaining = Math.max(targetAmount - currentAmount, 0);
+
+  let monthlyTarget = toFiniteNumber(raw.monthlyTarget);
+  const deadline = raw.deadline ? new Date(raw.deadline) : null;
+  if (monthlyTarget <= 0) {
+    if (deadline && !isNaN(deadline.getTime())) {
+      const now = new Date();
+      const monthsLeft = Math.max(
+        1,
+        (deadline.getFullYear() - now.getFullYear()) * 12 +
+          (deadline.getMonth() - now.getMonth()) +
+          1
+      );
+      monthlyTarget = remaining / monthsLeft;
+    } else {
+      monthlyTarget = remaining > 0 ? remaining / 12 : 0;
+    }
+  }
+
+  let projectedCompletionDate = "";
+  if (raw.projectedCompletionDate) {
+    const match = String(raw.projectedCompletionDate).match(/^(\d{4}-\d{2})/);
+    projectedCompletionDate = match?.[1] ?? "";
+  }
+  if (!projectedCompletionDate && monthlyTarget > 0 && remaining > 0) {
+    const monthsToGoal = Math.ceil(remaining / monthlyTarget);
+    const d = new Date();
+    d.setMonth(d.getMonth() + monthsToGoal);
+    projectedCompletionDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const historySource = Array.isArray(raw.history) ? raw.history : [];
+  const history = historySource.map((entry: any, index: number) => {
+    const competencia = String(entry?.competencia ?? entry?.month ?? "");
+    const label =
+      typeof entry?.label === "string" && entry.label
+        ? entry.label
+        : /^\d{4}-\d{2}$/.test(competencia)
+        ? competenciaToLabel(competencia)
+        : `Mes ${index + 1}`;
+
+    const amount = toFiniteNumber(entry?.amount ?? entry?.value);
+    const cumulative = toFiniteNumber(entry?.cumulative ?? entry?.total ?? amount);
+
+    return {
+      competencia,
+      label,
+      amount,
+      cumulative,
+    };
+  });
+
+  return {
+    id: String(raw.id),
+    name: String(raw.name ?? "Reserva de Emergencia"),
+    currentAmount,
+    targetAmount,
+    percentage,
+    monthlyTarget,
+    projectedCompletionDate,
+    history,
+  };
+}
+
 export default function MetasPage() {
   const [goal, setGoal] = useState<GoalData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +149,7 @@ export default function MetasPage() {
       const res = await fetch("/api/goals");
       if (!res.ok) throw new Error("Erro ao carregar metas");
       const json = await res.json();
-      setGoal(json.goal ?? json);
+      setGoal(normalizeGoalData(json.goal ?? json));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -82,6 +163,9 @@ export default function MetasPage() {
 
   const handleAllocate = async () => {
     if (!goal || !allocateAmount) return;
+    const parsedAmount = parseFloat(allocateAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
+
     setAllocating(true);
     try {
       const res = await fetch("/api/goals", {
@@ -89,7 +173,7 @@ export default function MetasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: goal.id,
-          allocateAmount: parseFloat(allocateAmount),
+          currentAmount: goal.currentAmount + parsedAmount,
         }),
       });
       if (!res.ok) throw new Error("Erro ao alocar valor");

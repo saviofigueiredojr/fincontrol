@@ -13,6 +13,8 @@ import {
   Pie,
   Cell,
   Legend,
+  AreaChart,
+  Area,
 } from "recharts";
 import {
   TrendingUp,
@@ -60,11 +62,112 @@ interface DashboardData {
   }[];
 }
 
+interface ProjectionData {
+  competencia: string;
+  label: string;
+  projectedIncome: number;
+  projectedExpense: number;
+  projectedBalance: number;
+}
+
 const PIE_COLORS = ["#334155", "#0f766e", "#7c3f00", "#a16207", "#475569", "#6d28d9"];
+
+function toFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeDashboardData(payload: any): DashboardData {
+  const receitas = toFiniteNumber(payload?.receitas ?? payload?.totalIncome);
+  const despesas = toFiniteNumber(payload?.despesas ?? payload?.totalExpense);
+  const saldo = toFiniteNumber(payload?.saldo ?? payload?.balance ?? receitas - despesas);
+
+  const metaCurrent = toFiniteNumber(payload?.meta?.current ?? payload?.currentGoalAmount);
+  const metaTarget = toFiniteNumber(payload?.meta?.target ?? payload?.goalTarget);
+  const computedMetaPercentage =
+    metaTarget > 0 ? (metaCurrent / metaTarget) * 100 : 0;
+  const metaPercentage = toFiniteNumber(payload?.meta?.percentage ?? computedMetaPercentage);
+
+  const chartData = Array.isArray(payload?.chartData)
+    ? payload.chartData.map((item: any) => {
+      const competencia = typeof item?.competencia === "string" ? item.competencia : "";
+      const label =
+        typeof item?.label === "string" && item.label
+          ? item.label
+          : /^\d{4}-\d{2}$/.test(competencia)
+            ? competenciaToLabel(competencia)
+            : competencia || "-";
+
+      return {
+        competencia,
+        label,
+        receitas: toFiniteNumber(item?.receitas ?? item?.income ?? item?.totalIncome),
+        despesas: toFiniteNumber(item?.despesas ?? item?.expense ?? item?.totalExpense),
+      };
+    })
+    : [];
+
+  const despesasPorCategoriaSource = Array.isArray(payload?.despesasPorCategoria)
+    ? payload.despesasPorCategoria
+    : Array.isArray(payload?.topCategories)
+      ? payload.topCategories
+      : [];
+
+  const despesasPorCategoria = despesasPorCategoriaSource.map((item: any) => ({
+    name: String(item?.name ?? item?.category ?? "Categoria"),
+    value: toFiniteNumber(item?.value ?? item?.amount ?? item?.total ?? item?.spent),
+  }));
+
+  const parcelasAtivas = Array.isArray(payload?.parcelasAtivas)
+    ? payload.parcelasAtivas.map((item: any) => ({
+      id: String(item?.id ?? `${item?.description ?? "parcela"}-${item?.nextDueDate ?? ""}`),
+      description: String(item?.description ?? "Parcela"),
+      currentInstallment: toFiniteNumber(item?.currentInstallment),
+      totalInstallments: toFiniteNumber(item?.totalInstallments),
+      amount: toFiniteNumber(item?.amount),
+      nextDueDate: String(item?.nextDueDate ?? new Date().toISOString()),
+    }))
+    : [];
+
+  const orcamentoSource = Array.isArray(payload?.orcamentoPorCategoria)
+    ? payload.orcamentoPorCategoria
+    : Array.isArray(payload?.budgetProgress)
+      ? payload.budgetProgress
+      : [];
+
+  const orcamentoPorCategoria = orcamentoSource.map((item: any) => {
+    const actual = toFiniteNumber(item?.actual ?? item?.spent);
+    const budget = toFiniteNumber(item?.budget);
+    const fallbackPercentage = budget > 0 ? (actual / budget) * 100 : 0;
+
+    return {
+      category: String(item?.category ?? "Categoria"),
+      actual,
+      budget,
+      percentage: toFiniteNumber(item?.percentage ?? fallbackPercentage),
+    };
+  });
+
+  return {
+    receitas,
+    despesas,
+    saldo,
+    meta: {
+      current: metaCurrent,
+      target: metaTarget,
+      percentage: metaPercentage,
+    },
+    chartData,
+    despesasPorCategoria,
+    parcelasAtivas,
+    orcamentoPorCategoria,
+  };
+}
 
 export default function DashboardPage() {
   const [competencia, setCompetencia] = useState(getCurrentCompetencia());
   const [data, setData] = useState<DashboardData | null>(null);
+  const [projectionData, setProjectionData] = useState<ProjectionData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,10 +175,25 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dashboard?competencia=${competencia}`);
-      if (!res.ok) throw new Error("Erro ao carregar dados do dashboard");
-      const json = await res.json();
-      setData(json);
+      const [resDash, resProj] = await Promise.all([
+        fetch(`/api/dashboard?competencia=${competencia}`),
+        fetch(`/api/projection?months=6`)
+      ]);
+
+      if (!resDash.ok) throw new Error("Erro ao carregar dados do dashboard");
+
+      const jsonDash = await resDash.json();
+      setData(normalizeDashboardData(jsonDash));
+
+      if (resProj.ok) {
+        const jsonProj = await resProj.json();
+        setProjectionData(
+          jsonProj.map((p: any) => ({
+            ...p,
+            label: competenciaToLabel(p.competencia),
+          }))
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -185,9 +303,8 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p
-              className={`text-2xl font-semibold ${
-                data.saldo >= 0 ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"
-              }`}
+              className={`text-2xl font-semibold ${data.saldo >= 0 ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"
+                }`}
             >
               {formatCurrency(data.saldo)}
             </p>
@@ -343,13 +460,57 @@ export default function DashboardPage() {
                       item.percentage > 100
                         ? "bg-gradient-to-r from-rose-600 to-rose-500"
                         : item.percentage > 80
-                        ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                        : "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                          ? "bg-gradient-to-r from-amber-500 to-amber-400"
+                          : "bg-gradient-to-r from-emerald-500 to-emerald-400"
                     }
                   />
                 </div>
               ))
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Projection Chart */}
+      <Card className="lg:col-span-3">
+        <CardHeader>
+          <CardTitle>Projeção de Fluxo de Caixa (Próximos 6 meses)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={projectionData}>
+                <defs>
+                  <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  className="text-xs text-muted-foreground"
+                />
+                <YAxis
+                  tickFormatter={(v) => `R$ ${(v / 1000).toFixed(1)}k`}
+                  axisLine={false}
+                  tickLine={false}
+                  className="text-xs text-muted-foreground"
+                />
+                <Tooltip content={customTooltip} />
+                <Area
+                  type="monotone"
+                  dataKey="projectedBalance"
+                  name="Saldo Projetado"
+                  stroke="#0ea5e9"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#colorBalance)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </CardContent>
       </Card>
