@@ -109,10 +109,18 @@ cp .env.example .env
 Variaveis esperadas:
 
 ```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/fincontrol?schema=public"
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:6543/postgres?pgbouncer=true&connection_limit=1&schema=public"
+DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?schema=public"
 NEXTAUTH_SECRET="replace-with-a-32-plus-character-secret-value"
 NEXTAUTH_URL="http://localhost:3000"
 ```
+
+Uso recomendado com Supabase:
+
+- `DATABASE_URL`: Supavisor transaction mode (`6543`) para runtime em ambientes serverless
+- `DIRECT_URL`: Supavisor session mode (`5432`) para `prisma migrate` e demais comandos do Prisma CLI
+
+Se voce usar a conexao direta `db.<project-ref>.supabase.co:5432`, ela pode falhar em ambientes sem IPv6, como o build do Vercel.
 
 Para gerar um secret forte:
 
@@ -129,6 +137,15 @@ npm run generate
 npm run db:push
 npm run db:seed
 ```
+
+Se quiser rodar local sem encostar na sua base atual, use outro schema no `.env`, por exemplo:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:6543/postgres?pgbouncer=true&connection_limit=1&schema=fincontrol_local"
+DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?schema=fincontrol_local"
+```
+
+Se a URL ja tiver outros parametros, adicione o schema com `&schema=fincontrol_local`.
 
 ### 4. Inicie o app
 
@@ -211,7 +228,7 @@ fincontrol/
 O projeto ja usa PostgreSQL no Prisma, entao o caminho mais direto para deploy e:
 
 1. provisionar um banco PostgreSQL hospedado
-2. configurar `DATABASE_URL`, `NEXTAUTH_SECRET` e `NEXTAUTH_URL`
+2. configurar `DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET` e `NEXTAUTH_URL`
 3. importar o repositório no Vercel
 4. deixar o projeto privado no dashboard do Vercel
 5. usar o build configurado em `vercel.json`
