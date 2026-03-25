@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 28% 97%;
+    --foreground: 221 25% 14%;
+    --card: 45 29% 99%;
+    --card-foreground: 221 22% 14%;
+    --popover: 42 24% 98%;
+    --popover-foreground: 221 22% 14%;
+    --primary: 222 28% 15%;
+    --primary-foreground: 42 30% 97%;
+    --secondary: 38 24% 92%;
+    --secondary-foreground: 222 22% 19%;
+    --muted: 40 20% 93%;
+    --muted-foreground: 221 11% 42%;
+    --accent: 210 22% 91%;
+    --accent-foreground: 222 22% 17%;
+    --destructive: 4 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 33 19% 84%;
+    --input: 33 19% 84%;
+    --ring: 217 30% 41%;
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 224 20% 8%;
+    --foreground: 38 22% 91%;
+    --card: 223 18% 10%;
+    --card-foreground: 39 17% 91%;
+    --popover: 223 16% 11%;
+    --popover-foreground: 39 17% 91%;
+    --primary: 210 30% 72%;
+    --primary-foreground: 224 23% 9%;
+    --secondary: 222 15% 16%;
+    --secondary-foreground: 40 15% 92%;
+    --muted: 221 16% 14%;
+    --muted-foreground: 222 11% 67%;
+    --accent: 220 14% 18%;
+    --accent-foreground: 40 15% 92%;
+    --destructive: 2 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 22%;
+    --input: 220 13% 22%;
+    --ring: 209 27% 66%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans), "Manrope", "Segoe UI", sans-serif;
+    background-image:
+      radial-gradient(circle at 12% 10%, hsl(212 28% 95% / 0.9) 0, transparent 38%),
+      radial-gradient(circle at 88% 0%, hsl(33 38% 93% / 0.8) 0, transparent 40%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(34 26% 95%) 100%);
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at 10% 0%, hsl(218 38% 24% / 0.3) 0, transparent 38%),
+      radial-gradient(circle at 100% 0%, hsl(33 32% 20% / 0.3) 0, transparent 40%),
+      linear-gradient(180deg, hsl(224 22% 8%) 0%, hsl(225 22% 7%) 100%);
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display), "Fraunces", Georgia, serif;
+    letter-spacing: -0.02em;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    @apply w-full rounded-xl border border-border/70 bg-background/80 px-3 text-sm text-foreground shadow-sm transition-all duration-200;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    @apply h-10;
+  }
+
+  textarea {
+    @apply min-h-24 py-2;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-muted-foreground/80;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  select:focus,
+  textarea:focus {
+    @apply border-ring/60 outline-none ring-2 ring-ring/25;
+  }
+
+  input[type="file"] {
+    @apply cursor-pointer px-2 py-1.5;
+  }
+
+  input[type="file"]::file-selector-button {
+    margin-right: 0.75rem;
+    border: 0;
+    border-radius: 0.75rem;
+    padding: 0.4rem 0.8rem;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  table {
+    @apply w-full border-collapse;
+  }
+
+  thead th {
+    @apply font-medium text-muted-foreground;
+  }
+
+  tbody tr {
+    @apply transition-colors;
+  }
+
+  tbody tr:hover {
+    @apply bg-muted/35;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-3xl border border-border/70 bg-card/80 shadow-[0_24px_44px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl;
+  }
+
+  .section-title {
+    @apply text-3xl font-semibold tracking-tight text-foreground;
+  }
+}

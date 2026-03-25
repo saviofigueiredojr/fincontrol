@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         String        @default("member") // admin | member
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+  creditCards  CreditCard[]
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  date              DateTime
+  competencia       String   // YYYY-MM (mês de competência)
+  description       String
+  category          String
+  amount            Float    // sempre positivo
+  type              String   // income | expense | transfer
+  ownership         String   // mine | partner | joint
+  isRecurring       Boolean  @default(false)
+  recurringId       String?  // agrupa recorrentes
+  installmentCurrent Int?    // parcela atual (1, 2, 3...)
+  installmentTotal   Int?    // total de parcelas
+  parentId          String?  // ID da transação original (parcelas)
+  source            String?  // manual | csv_inter | ofx | recurring
+  cardStatementId   String?
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  cardStatement     CardStatement? @relation(fields: [cardStatementId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([competencia])
+  @@index([userId])
+  @@index([ownership])
+  @@index([parentId])
+}
+
+model CreditCard {
+  id         String          @id @default(cuid())
+  name       String          // "Inter", "Nubank", etc.
+  bank       String
+  closingDay Int             // dia de fechamento da fatura
+  dueDay     Int             // dia de vencimento
+  userId     String
+  user       User            @relation(fields: [userId], references: [id])
+  statements CardStatement[]
+  createdAt  DateTime        @default(now())
+}
+
+model CardStatement {
+  id           String        @id @default(cuid())
+  cardId       String
+  competencia  String        // YYYY-MM
+  totalAmount  Float
+  status       String        @default("open") // open | paid
+  card         CreditCard    @relation(fields: [cardId], references: [id])
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+
+  @@unique([cardId, competencia])
+}
+
+model MonthClose {
+  id              String   @id @default(cuid())
+  competencia     String   @unique // YYYY-MM
+  openingBalance  Float
+  totalIncome     Float
+  totalExpense    Float
+  metaAllocation  Float    @default(0)
+  closingBalance  Float
+  status          String   @default("open") // open | closed
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Goal {
+  id            String   @id @default(cuid())
+  name          String
+  targetAmount  Float
+  currentAmount Float    @default(0)
+  deadline      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model RecurringTemplate {
+  id          String   @id @default(cuid())
+  description String
+  category    String
+  amount      Float
+  type        String   // income | expense
+  ownership   String   // mine | partner | joint
+  dayOfMonth  Int      // dia do mês para lançar
+  startDate   String   // YYYY-MM
+  endDate     String?  // YYYY-MM (null = indefinido)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  success   Boolean
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+}
