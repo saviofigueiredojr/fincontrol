@@ -3,8 +3,19 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model Household {
+  id                 String              @id @default(cuid())
+  name               String
+  users              User[]
+  goals              Goal[]
+  monthCloses        MonthClose[]
+  recurringTemplates RecurringTemplate[]
+  settings           Setting[]
+  createdAt          DateTime            @default(now())
 }
 
 model User {
@@ -13,32 +24,37 @@ model User {
   email        String        @unique
   passwordHash String
   role         String        @default("member") // admin | member
+  householdId  String
+  household    Household     @relation(fields: [householdId], references: [id])
   createdAt    DateTime      @default(now())
   transactions Transaction[]
   creditCards  CreditCard[]
+
+  @@index([householdId])
 }
 
 model Transaction {
-  id                String   @id @default(cuid())
-  date              DateTime
-  competencia       String   // YYYY-MM (mês de competência)
-  description       String
-  category          String
-  amount            Float    // sempre positivo
-  type              String   // income | expense | transfer
-  ownership         String   // mine | partner | joint
-  isRecurring       Boolean  @default(false)
-  recurringId       String?  // agrupa recorrentes
-  installmentCurrent Int?    // parcela atual (1, 2, 3...)
-  installmentTotal   Int?    // total de parcelas
-  parentId          String?  // ID da transação original (parcelas)
-  source            String?  // manual | csv_inter | ofx | recurring
-  cardStatementId   String?
-  userId            String
-  user              User     @relation(fields: [userId], references: [id])
-  cardStatement     CardStatement? @relation(fields: [cardStatementId], references: [id])
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String         @id @default(cuid())
+  date               DateTime
+  competencia        String // YYYY-MM (mês de competência)
+  description        String
+  category           String
+  amount             Float // sempre positivo
+  type               String // income | expense | transfer
+  ownership          String // mine | partner | joint
+  isSecret           Boolean        @default(false) // oculta do parceiro
+  isRecurring        Boolean        @default(false)
+  recurringId        String? // agrupa recorrentes
+  installmentCurrent Int? // parcela atual (1, 2, 3...)
+  installmentTotal   Int? // total de parcelas
+  parentId           String? // ID da transação original (parcelas)
+  source             String? // manual | csv_inter | ofx | recurring
+  cardStatementId    String?
+  userId             String
+  user               User           @relation(fields: [userId], references: [id])
+  cardStatement      CardStatement? @relation(fields: [cardStatementId], references: [id])
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   @@index([competencia])
   @@index([userId])
@@ -48,10 +64,10 @@ model Transaction {
 
 model CreditCard {
   id         String          @id @default(cuid())
-  name       String          // "Inter", "Nubank", etc.
+  name       String // "Inter", "Nubank", etc.
   bank       String
-  closingDay Int             // dia de fechamento da fatura
-  dueDay     Int             // dia de vencimento
+  closingDay Int // dia de fechamento da fatura
+  dueDay     Int // dia de vencimento
   userId     String
   user       User            @relation(fields: [userId], references: [id])
   statements CardStatement[]
@@ -61,7 +77,7 @@ model CreditCard {
 model CardStatement {
   id           String        @id @default(cuid())
   cardId       String
-  competencia  String        // YYYY-MM
+  competencia  String // YYYY-MM
   totalAmount  Float
   status       String        @default("open") // open | paid
   card         CreditCard    @relation(fields: [cardId], references: [id])
@@ -72,47 +88,69 @@ model CardStatement {
 }
 
 model MonthClose {
-  id              String   @id @default(cuid())
-  competencia     String   @unique // YYYY-MM
-  openingBalance  Float
-  totalIncome     Float
-  totalExpense    Float
-  metaAllocation  Float    @default(0)
-  closingBalance  Float
-  status          String   @default("open") // open | closed
-  closedAt        DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(cuid())
+  competencia    String // YYYY-MM
+  householdId    String
+  household      Household @relation(fields: [householdId], references: [id])
+  openingBalance Float
+  totalIncome    Float
+  totalExpense   Float
+  metaAllocation Float     @default(0)
+  closingBalance Float
+  status         String    @default("open") // open | closed
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([householdId, competencia])
 }
 
 model Goal {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String
   targetAmount  Float
-  currentAmount Float    @default(0)
+  currentAmount Float     @default(0)
   deadline      DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  householdId   String
+  household     Household @relation(fields: [householdId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([householdId])
 }
 
 model RecurringTemplate {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   description String
   category    String
   amount      Float
-  type        String   // income | expense
-  ownership   String   // mine | partner | joint
-  dayOfMonth  Int      // dia do mês para lançar
-  startDate   String   // YYYY-MM
-  endDate     String?  // YYYY-MM (null = indefinido)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  type        String // income | expense
+  ownership   String // mine | partner | joint
+  dayOfMonth  Int // dia do mês para lançar
+  startDate   String // YYYY-MM
+  endDate     String? // YYYY-MM (null = indefinido)
+
+  // Projection features
+  interval      String  @default("monthly") // monthly | yearly
+  intervalCount Int     @default(1)
+  isVariable    Boolean @default(false)
+
+  isActive    Boolean   @default(true)
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@index([householdId])
 }
 
 model Setting {
-  id    String @id @default(cuid())
-  key   String @unique
-  value String
+  id          String    @id @default(cuid())
+  key         String
+  value       String
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id])
+
+  @@unique([householdId, key])
 }
 
 model LoginAttempt {
@@ -122,5 +160,5 @@ model LoginAttempt {
   ip        String?
   createdAt DateTime @default(now())
 
-  @@index([email, createdAt])
+  @@index([email, ip, createdAt])
 }

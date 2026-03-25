@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
@@ -10,7 +13,11 @@ export async function GET() {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
+
     const templates = await prisma.recurringTemplate.findMany({
+      where: { householdId },
       orderBy: [{ isActive: "desc" }, { description: "asc" }],
     });
 
@@ -31,8 +38,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
+
     const body = await request.json();
-    const { description, category, amount, type, ownership, dayOfMonth, startDate, endDate } = body;
+    const {
+      description, category, amount, type, ownership,
+      dayOfMonth, startDate, endDate,
+      interval, intervalCount, isVariable
+    } = body;
 
     if (!description || !category || !amount || !type || !ownership || !dayOfMonth || !startDate) {
       return NextResponse.json(
@@ -65,6 +79,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "endDate deve ser YYYY-MM" }, { status: 400 });
     }
 
+    const finalInterval = interval || "monthly";
+    if (!["monthly", "yearly"].includes(finalInterval)) {
+      return NextResponse.json({ error: "interval deve ser monthly ou yearly" }, { status: 400 });
+    }
+
+    const finalIntervalCount = typeof intervalCount === "number" ? intervalCount : 1;
+    if (finalIntervalCount < 1) {
+      return NextResponse.json({ error: "intervalCount deve ser maior ou igual a 1" }, { status: 400 });
+    }
+
+    const finalIsVariable = typeof isVariable === "boolean" ? isVariable : false;
+
     const template = await prisma.recurringTemplate.create({
       data: {
         description,
@@ -75,7 +101,11 @@ export async function POST(request: NextRequest) {
         dayOfMonth,
         startDate,
         endDate: endDate || null,
+        interval: finalInterval,
+        intervalCount: finalIntervalCount,
+        isVariable: finalIsVariable,
         isActive: true,
+        householdId,
       },
     });
 
@@ -96,6 +126,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
+
     const body = await request.json();
     const { id, ...fields } = body;
 
@@ -103,14 +136,16 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "id é obrigatório" }, { status: 400 });
     }
 
+    // Verify template belongs to this household
     const existing = await prisma.recurringTemplate.findUnique({ where: { id } });
-    if (!existing) {
+    if (!existing || existing.householdId !== householdId) {
       return NextResponse.json({ error: "Template não encontrado" }, { status: 404 });
     }
 
     const allowedFields = [
       "description", "category", "amount", "type", "ownership",
       "dayOfMonth", "startDate", "endDate", "isActive",
+      "interval", "intervalCount", "isVariable"
     ];
 
     const data: Record<string, unknown> = {};
@@ -135,6 +170,18 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    if (data.interval !== undefined && !["monthly", "yearly"].includes(data.interval as string)) {
+      return NextResponse.json({ error: "interval deve ser monthly ou yearly" }, { status: 400 });
+    }
+
+    if (data.intervalCount !== undefined && (typeof data.intervalCount !== "number" || data.intervalCount < 1)) {
+      return NextResponse.json({ error: "intervalCount deve ser maior ou igual a 1" }, { status: 400 });
+    }
+
+    if (data.isVariable !== undefined && typeof data.isVariable !== "boolean") {
+      return NextResponse.json({ error: "isVariable deve ser booleano" }, { status: 400 });
+    }
+
     const updated = await prisma.recurringTemplate.update({
       where: { id },
       data,
@@ -157,6 +204,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -164,8 +214,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Parâmetro id é obrigatório" }, { status: 400 });
     }
 
+    // Verify template belongs to this household
     const existing = await prisma.recurringTemplate.findUnique({ where: { id } });
-    if (!existing) {
+    if (!existing || existing.householdId !== householdId) {
       return NextResponse.json({ error: "Template não encontrado" }, { status: 404 });
     }
 

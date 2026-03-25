@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth-options";
-import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
+import { getSessionUser } from "@/lib/session-user";
+import { updateGoalSchema } from "@/modules/goals/goals.schemas";
+import { listGoals, updateGoal } from "@/modules/goals/goals.service";
+
+export const dynamic = "force-dynamic";
+
+function getValidationMessage(error: { issues?: Array<{ message?: string }> }) {
+  return error.issues?.[0]?.message ?? "Payload inválido";
+}
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
-    const goals = await prisma.goal.findMany({
-      orderBy: { createdAt: "desc" },
-    });
+    const { householdId } = await getHouseholdForUser(sessionUser.id);
+    const goals = await listGoals(householdId);
 
     return NextResponse.json(goals);
   } catch (error) {
@@ -26,47 +32,36 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const { householdId } = await getHouseholdForUser(sessionUser.id);
     const body = await request.json();
-    const { id, name, targetAmount, currentAmount, deadline } = body;
+    const parsedBody = updateGoalSchema.safeParse(body);
 
-    if (!id) {
-      return NextResponse.json({ error: "id é obrigatório" }, { status: 400 });
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: getValidationMessage(parsedBody.error) },
+        { status: 400 }
+      );
     }
 
-    const existing = await prisma.goal.findUnique({ where: { id } });
-    if (!existing) {
+    const result = await updateGoal(householdId, parsedBody.data);
+
+    if (result.kind === "not_found") {
       return NextResponse.json({ error: "Meta não encontrada" }, { status: 404 });
     }
 
-    const data: Record<string, unknown> = {};
-    if (name !== undefined) data.name = name;
-    if (targetAmount !== undefined) {
-      if (typeof targetAmount !== "number" || targetAmount < 0) {
-        return NextResponse.json({ error: "targetAmount deve ser um número positivo" }, { status: 400 });
-      }
-      data.targetAmount = targetAmount;
-    }
-    if (currentAmount !== undefined) {
-      if (typeof currentAmount !== "number" || currentAmount < 0) {
-        return NextResponse.json({ error: "currentAmount deve ser um número positivo" }, { status: 400 });
-      }
-      data.currentAmount = currentAmount;
-    }
-    if (deadline !== undefined) {
-      data.deadline = deadline ? new Date(deadline) : null;
+    if (result.kind === "invalid_deadline") {
+      return NextResponse.json(
+        { error: "deadline deve ser uma data válida" },
+        { status: 400 }
+      );
     }
 
-    const updated = await prisma.goal.update({
-      where: { id },
-      data,
-    });
-
-    return NextResponse.json(updated);
+    return NextResponse.json(result.goal);
   } catch (error) {
     console.error("Update goal error:", error);
     return NextResponse.json(

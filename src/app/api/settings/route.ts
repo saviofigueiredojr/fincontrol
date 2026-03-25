@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
@@ -10,7 +13,12 @@ export async function GET() {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
-    const settings = await prisma.setting.findMany();
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
+
+    const settings = await prisma.setting.findMany({
+      where: { householdId },
+    });
 
     const result: Record<string, string> = {};
     for (const s of settings) {
@@ -33,6 +41,9 @@ export async function PUT(request: NextRequest) {
     if (!session?.user) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
+
+    const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
 
     const body = await request.json();
 
@@ -62,8 +73,8 @@ export async function PUT(request: NextRequest) {
 
     for (const { key, value } of entries) {
       const setting = await prisma.setting.upsert({
-        where: { key },
-        create: { key, value },
+        where: { householdId_key: { householdId, key } },
+        create: { key, value, householdId },
         update: { value },
       });
       results.push(setting);
