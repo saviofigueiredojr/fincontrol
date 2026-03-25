@@ -14,11 +14,30 @@ Este repositório pode ser publico, enquanto o projeto publicado no Vercel perma
 
 ```env
 DATABASE_URL=
+DIRECT_URL=
 NEXTAUTH_SECRET=
 NEXTAUTH_URL=
 ```
 
 `NEXTAUTH_URL` deve apontar para a URL final do projeto no Vercel.
+
+## Supabase + Vercel
+
+Se estiver usando Supabase, prefira este arranjo:
+
+- `DATABASE_URL`: Supavisor transaction mode (`6543`) para o app em runtime
+- `DIRECT_URL`: Supavisor session mode (`5432`) para `prisma migrate deploy`
+
+Exemplo:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1&schema=public"
+DIRECT_URL="postgresql://USER:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres?schema=public"
+NEXTAUTH_SECRET="um-secret-com-32-ou-mais-caracteres"
+NEXTAUTH_URL="https://seu-projeto.vercel.app"
+```
+
+Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando seu projeto nao tiver suporte a IPv6.
 
 ## Fluxo recomendado
 

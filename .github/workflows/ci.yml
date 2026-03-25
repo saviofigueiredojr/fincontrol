@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fincontrol?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/fincontrol?schema=public
       NEXTAUTH_SECRET: test-secret-that-is-long-enough-for-ci
       NEXTAUTH_URL: http://localhost:3000
     steps:
