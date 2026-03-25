@@ -1,0 +1,30 @@
+name: Feature request
+description: Sugira uma melhoria de produto, UX ou arquitetura.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema ou oportunidade
+      description: Que necessidade essa ideia resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Descreva a solução que você imagina.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impacto esperado
+      description: Onde essa mudança ajuda mais?
+  - type: textarea
+    id: notes
+    attributes:
+      label: Observações adicionais
+

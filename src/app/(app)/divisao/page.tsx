@@ -9,6 +9,7 @@ import {
   AlertCircle,
   ArrowLeftRight,
   Percent,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,8 @@ interface Settings {
 
 export default function DivisaoPage() {
   const [competencia, setCompetencia] = useState(getCurrentCompetencia());
-  const [mode, setMode] = useState<"equal" | "proportional">("proportional");
+  const [mode, setMode] = useState<"equal" | "proportional" | "custom">("proportional");
+  const [customPercent, setCustomPercent] = useState(50);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [settings, setSettings] = useState<Settings>({ myIncome: 8000.00, partnerIncome: 7700.00 });
   const [loading, setLoading] = useState(true);
@@ -86,8 +88,8 @@ export default function DivisaoPage() {
   const totalMyIndividual = myIndividualExpenses.reduce((sum, tx) => sum + tx.amount, 0);
   const totalPartnerIndividual = partnerIndividualExpenses.reduce((sum, tx) => sum + tx.amount, 0);
 
-  const mySharePercent = mode === "equal" ? 50 : myPercentage;
-  const partnerSharePercent = mode === "equal" ? 50 : partnerPercentage;
+  const mySharePercent = mode === "equal" ? 50 : mode === "custom" ? customPercent : myPercentage;
+  const partnerSharePercent = mode === "equal" ? 50 : mode === "custom" ? (100 - customPercent) : partnerPercentage;
 
   const myShareJoint = (totalJoint * mySharePercent) / 100;
   const partnerShareJoint = (totalJoint * partnerSharePercent) / 100;
@@ -132,8 +134,8 @@ export default function DivisaoPage() {
       </div>
 
       {/* Mode toggle */}
-      <div className="flex items-center gap-3">
-        <div className="flex rounded-md border overflow-hidden">
+      <div className="space-y-3">
+        <div className="flex rounded-md border overflow-hidden w-fit">
           <button
             onClick={() => setMode("equal")}
             className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 ${
@@ -150,9 +152,43 @@ export default function DivisaoPage() {
             }`}
           >
             <Percent className="h-4 w-4" />
-            Proporcional a Renda
+            Proporcional
+          </button>
+          <button
+            onClick={() => setMode("custom")}
+            className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              mode === "custom" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"
+            }`}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Personalizado
           </button>
         </div>
+
+        {mode === "custom" && (
+          <Card className="max-w-md">
+            <CardContent className="pt-4 pb-4 space-y-3">
+              <div className="flex justify-between text-sm font-medium">
+                <span>Eu: {customPercent.toFixed(0)}%</span>
+                <span>Ele: {(100 - customPercent).toFixed(0)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={customPercent}
+                onChange={(e) => setCustomPercent(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary dark:bg-gray-700"
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>0%</span>
+                <span>50%</span>
+                <span>100%</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Income cards */}
@@ -196,7 +232,7 @@ export default function DivisaoPage() {
         <CardHeader>
           <CardTitle>Despesas Conjuntas</CardTitle>
           <CardDescription>
-            Divisao {mode === "equal" ? "igualitaria (50/50)" : `proporcional (${myPercentage.toFixed(1)}% / ${partnerPercentage.toFixed(1)}%)`}
+            Divisao {mode === "equal" ? "igualitaria (50/50)" : mode === "custom" ? `personalizada (${customPercent.toFixed(0)}% / ${(100 - customPercent).toFixed(0)}%)` : `proporcional (${myPercentage.toFixed(1)}% / ${partnerPercentage.toFixed(1)}%)`}
           </CardDescription>
         </CardHeader>
         <CardContent>

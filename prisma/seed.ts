@@ -14,51 +14,76 @@ async function main() {
   await prisma.setting.deleteMany();
   await prisma.loginAttempt.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.household.deleteMany();
 
-  // Create users
-  const savioHash = await bcrypt.hash("Seed@2026!", 10);
-  const iagoHash = await bcrypt.hash("Seed@2026!", 10);
+  // Create household
+  const household = await prisma.household.create({
+    data: { name: "Casa" },
+  });
 
-  const savio = await prisma.user.create({
+  // Create users (NO real PII - dev-only credentials)
+  const sharedDevPassword = "Seed@2026!";
+  const user1Hash = await bcrypt.hash(sharedDevPassword, 10);
+  const user2Hash = await bcrypt.hash(sharedDevPassword, 10);
+
+  const user1 = await prisma.user.create({
     data: {
       name: "Usuário 1",
       email: "usuario1@fincontrol.local",
-      passwordHash: savioHash,
+      passwordHash: user1Hash,
       role: "admin",
+      householdId: household.id,
     },
   });
 
-  const namorado = await prisma.user.create({
+  const user2 = await prisma.user.create({
     data: {
       name: "Usuário 2",
       email: "usuario2@fincontrol.local",
-      passwordHash: iagoHash,
+      passwordHash: user2Hash,
       role: "member",
+      householdId: household.id,
+    },
+  });
+
+  // Isolated household for testing (3rd user sees zero data)
+  const otherHousehold = await prisma.household.create({
+    data: { name: "Outro Lar" },
+  });
+
+  const isolatedHash = await bcrypt.hash("Seed@2026!", 10);
+  await prisma.user.create({
+    data: {
+      name: "Usuário Isolado",
+      email: "isolado@fincontrol.local",
+      passwordHash: isolatedHash,
+      role: "member",
+      householdId: otherHousehold.id,
     },
   });
 
   // Settings
   await prisma.setting.createMany({
     data: [
-      { key: "division_mode", value: "proportional" },
-      { key: "primary_income", value: "8000.00" },
-      { key: "partner_income", value: "6800.00" },
-      { key: "partner_va", value: "900.00" },
+      { key: "division_mode", value: "proportional", householdId: household.id },
+      { key: "primary_income", value: "8000.00", householdId: household.id },
+      { key: "partner_income", value: "6800.00", householdId: household.id },
+      { key: "partner_va", value: "900.00", householdId: household.id },
     ],
   });
 
   // Credit Cards
   const cardInter = await prisma.creditCard.create({
-    data: { name: "Inter", bank: "Inter", closingDay: 25, dueDay: 2, userId: savio.id },
+    data: { name: "Inter", bank: "Inter", closingDay: 25, dueDay: 2, userId: user1.id },
   });
   await prisma.creditCard.create({
-    data: { name: "Caixa", bank: "Caixa", closingDay: 20, dueDay: 1, userId: savio.id },
+    data: { name: "Caixa", bank: "Caixa", closingDay: 20, dueDay: 1, userId: user1.id },
   });
   await prisma.creditCard.create({
-    data: { name: "C6", bank: "C6 Bank", closingDay: 15, dueDay: 22, userId: savio.id },
+    data: { name: "C6", bank: "C6 Bank", closingDay: 15, dueDay: 22, userId: user1.id },
   });
   await prisma.creditCard.create({
-    data: { name: "Nubank", bank: "Nubank", closingDay: 10, dueDay: 17, userId: savio.id },
+    data: { name: "Nubank", bank: "Nubank", closingDay: 10, dueDay: 17, userId: user1.id },
   });
 
   // Goal
@@ -68,6 +93,7 @@ async function main() {
       targetAmount: 30000,
       currentAmount: 0,
       deadline: new Date("2027-03-31"),
+      householdId: household.id,
     },
   });
 
@@ -85,7 +111,7 @@ async function main() {
       type: "income",
       ownership: "mine",
       source: "manual",
-      userId: savio.id,
+      userId: user1.id,
     },
   });
 
@@ -100,7 +126,7 @@ async function main() {
       type: "income",
       ownership: "mine",
       source: "manual",
-      userId: savio.id,
+      userId: user1.id,
     },
   });
 
@@ -123,7 +149,7 @@ async function main() {
         type: "expense",
         ownership: "mine",
         source: "manual",
-        userId: savio.id,
+        userId: user1.id,
       },
     });
   }
@@ -147,7 +173,7 @@ async function main() {
         type: "expense",
         ownership: "mine",
         source: "manual",
-        userId: savio.id,
+        userId: user1.id,
       },
     });
   }
@@ -158,6 +184,7 @@ async function main() {
   await prisma.monthClose.create({
     data: {
       competencia: comp0326,
+      householdId: household.id,
       openingBalance: 2500.00,
       totalIncome: totalIncome0326,
       totalExpense: totalExpense0326,
@@ -171,7 +198,7 @@ async function main() {
 
   // Recebíveis extraordinários abril
   const recebiveisAbril = [
-    { desc: "Repasse namorado (ajuste)", amount: 250.00 },
+    { desc: "Repasse parceiro (ajuste)", amount: 250.00 },
     { desc: "Venda da Geladeira", amount: 400.0 },
     { desc: "Empréstimo a receber", amount: 100.0 },
   ];
@@ -187,7 +214,7 @@ async function main() {
         type: "income",
         ownership: "mine",
         source: "manual",
-        userId: savio.id,
+        userId: user1.id,
       },
     });
   }
@@ -203,22 +230,22 @@ async function main() {
       type: "expense",
       ownership: "joint",
       source: "manual",
-      userId: savio.id,
+      userId: user1.id,
     },
   });
 
-  // Repasse namorado maio
+  // Repasse parceiro maio
   await prisma.transaction.create({
     data: {
       date: new Date("2026-05-05"),
       competencia: "2026-05",
-      description: "Repasse namorado (ajuste)",
+      description: "Repasse parceiro (ajuste)",
       category: "Receita Extra",
       amount: 250.00,
       type: "income",
       ownership: "mine",
       source: "manual",
-      userId: savio.id,
+      userId: user1.id,
     },
   });
 
@@ -249,7 +276,7 @@ async function main() {
         type: "expense",
         ownership: "mine",
         source: "manual",
-        userId: savio.id,
+        userId: user1.id,
       },
     });
   }
@@ -257,8 +284,8 @@ async function main() {
   // Recurring templates - despesas fixas conjuntas (a partir de 04/2026)
   const despesasFixas = [
     { desc: "Aluguel", category: "Moradia", amount: 2800.00, day: 5 },
-    { desc: "Água", category: "Moradia", amount: 150.0, day: 10 },
-    { desc: "Luz", category: "Moradia", amount: 260.0, day: 15 },
+    { desc: "Água", category: "Moradia", amount: 150.0, day: 10, isVariable: true },
+    { desc: "Luz", category: "Moradia", amount: 260.0, day: 15, isVariable: true },
     { desc: "Internet", category: "Moradia", amount: 100.0, day: 10 },
     { desc: "Dados Móveis", category: "Comunicação", amount: 90.0, day: 10 },
     { desc: "Alimentação/Mercado", category: "Alimentação", amount: 950.0, day: 1 },
@@ -274,7 +301,9 @@ async function main() {
         ownership: "joint",
         dayOfMonth: d.day,
         startDate: "2026-04",
+        isVariable: d.isVariable || false,
         isActive: true,
+        householdId: household.id,
       },
     });
   }
@@ -290,12 +319,13 @@ async function main() {
       dayOfMonth: 5,
       startDate: "2026-04",
       isActive: true,
+      householdId: household.id,
     },
   });
 
   await prisma.recurringTemplate.create({
     data: {
-      description: "Renda Líquida CLT - Namorado",
+      description: "Renda Líquida CLT - Usuário 2",
       category: "Salário",
       amount: 6800.0,
       type: "income",
@@ -303,12 +333,13 @@ async function main() {
       dayOfMonth: 5,
       startDate: "2026-04",
       isActive: true,
+      householdId: household.id,
     },
   });
 
   await prisma.recurringTemplate.create({
     data: {
-      description: "Vale Alimentação - Namorado",
+      description: "Vale Alimentação - Usuário 2",
       category: "Benefício",
       amount: 900.0,
       type: "income",
@@ -316,6 +347,22 @@ async function main() {
       dayOfMonth: 5,
       startDate: "2026-04",
       isActive: true,
+      householdId: household.id,
+    },
+  });
+
+  await prisma.recurringTemplate.create({
+    data: {
+      description: "13º Salário - Usuário 2",
+      category: "Salário",
+      amount: 6800.0,
+      type: "income",
+      ownership: "partner",
+      dayOfMonth: 20,
+      interval: "yearly",
+      startDate: "2026-11", // Novembro
+      isActive: true,
+      householdId: household.id,
     },
   });
 
@@ -330,6 +377,15 @@ async function main() {
       if (comp < tmpl.startDate) continue;
       if (tmpl.endDate && comp > tmpl.endDate) continue;
 
+      const startYear = parseInt(tmpl.startDate.split("-")[0], 10);
+      const startMonth = parseInt(tmpl.startDate.split("-")[1], 10);
+      const currentYear = baseDate.getFullYear();
+      const currentMonth = baseDate.getMonth() + 1;
+      const monthsDiff = (currentYear - startYear) * 12 + (currentMonth - startMonth);
+
+      if (tmpl.interval === "yearly" && monthsDiff % (12 * tmpl.intervalCount) !== 0) continue;
+      if (tmpl.interval === "monthly" && monthsDiff % tmpl.intervalCount !== 0) continue;
+
       await prisma.transaction.create({
         data: {
           date: new Date(baseDate.getFullYear(), baseDate.getMonth(), tmpl.dayOfMonth),
@@ -342,15 +398,16 @@ async function main() {
           isRecurring: true,
           recurringId: tmpl.id,
           source: "recurring",
-          userId: tmpl.ownership === "partner" ? namorado.id : savio.id,
+          userId: tmpl.ownership === "partner" ? user2.id : user1.id,
         },
       });
     }
   }
 
   console.log("✅ Seed completed successfully!");
-  console.log(`   Usuário 1: usuario1@fincontrol.local`);
-  console.log(`   Usuário 2: usuario2@fincontrol.local`);
+  console.log(`   Usuário 1: usuario1@fincontrol.local (${sharedDevPassword})`);
+  console.log(`   Usuário 2: usuario2@fincontrol.local (${sharedDevPassword})`);
+  console.log(`   Isolado:   isolado@fincontrol.local  (Seed@2026!) — outro household`);
 }
 
 main()

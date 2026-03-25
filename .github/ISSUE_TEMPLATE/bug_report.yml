@@ -1,0 +1,45 @@
+name: Bug report
+description: Reporte um problema reproduzível no app ou no setup local.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por abrir um bug. Tente incluir passos claros e não envie dados financeiros reais.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Resumo
+      description: O que aconteceu?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      description: Liste o caminho exato para reproduzir o problema.
+      placeholder: |
+        1. Ir para ...
+        2. Clicar em ...
+        3. Ver erro em ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Ambiente
+      description: Informe sistema operacional, Node, navegador e contexto local/Vercel.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs ou screenshots
+      description: Cole logs relevantes ou anexe imagens, sem expor dados sensíveis.
+

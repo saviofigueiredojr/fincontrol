@@ -1,136 +1,232 @@
 # FinControl
 
-Sistema de controle financeiro para casais, construído com Next.js 14 e SQLite. Projetado para gerenciar finanças pessoais e conjuntas em um cenário de transição — mudança de cidade, unificação de rendas e planejamento de metas.
+Aplicacao de controle financeiro familiar feita com Next.js, Prisma e NextAuth.
+
+O projeto organiza receitas, despesas, cartoes, metas e fechamento mensal em uma interface unica. O foco atual e um household pequeno, com visibilidade compartilhada por padrao e suporte a lancamentos secretos quando necessario.
+
+## Status
+
+Projeto pessoal em evolucao.
+
+- Fluxo principal funcional para uso local
+- Preparado para PostgreSQL
+- Compativel com deploy em Vercel usando PostgreSQL hospedado
+- CI basica incluida para garantir build em pushes e PRs
+- Hardening, testes automatizados e acabamento de producao ainda em andamento
+- Repositorio pode ser publico, mesmo com o app publicado de forma privada
+
+`package.json` continua com `"private": true` de proposito, para evitar publish acidental no npm.
+
+## O que o app faz
+
+- Dashboard mensal com receitas, despesas, saldo, categorias e projecao
+- CRUD de lancamentos com `mine`, `partner` e `joint`
+- Marcacao de transacoes secretas
+- Importacao de faturas por CSV do Inter e OFX
+- Controle de parcelas ativas
+- Divisao de despesas em modo `50/50`, proporcional ou personalizado
+- Metas financeiras com progresso e aportes
+- Fechamento e reabertura de mes
+- Controle de creditos PJ
+- Isolamento por `household`
 
 ## Stack
 
-- **Framework**: Next.js 14 (App Router)
-- **UI**: Tailwind CSS + Radix UI
-- **Banco de dados**: SQLite via Prisma ORM
-- **Autenticação**: NextAuth.js (Credentials + JWT)
-- **Gráficos**: Recharts
-- **Import de faturas**: CSV (Inter) e OFX (universal)
+- Next.js 14 + App Router
+- React 18 + TypeScript
+- Prisma ORM
+- PostgreSQL
+- NextAuth com `CredentialsProvider` e JWT
+- Tailwind CSS + Radix UI
+- Recharts
 
-## Funcionalidades
+## Arquitetura
 
-### Dashboard
-Visão geral do mês: receitas, despesas, saldo, progresso da meta de reserva de emergência. Gráfico de barras (6 meses), pizza por categoria e orçamento por categoria com barras de progresso.
+O projeto e um monolito web com frontend e backend no mesmo repositorio:
 
-### Lançamentos
-CRUD completo de transações com filtros por competência, titular (meu / dele / conjunto), tipo e categoria. Suporte a parcelas com geração automática de lançamentos futuros.
+- `src/app/(app)`: telas autenticadas
+- `src/app/api`: rotas HTTP via Route Handlers
+- `src/lib`: auth, prisma, helpers e regras compartilhadas
+- `src/modules`: contratos e servicos por dominio
+- `prisma`: schema, migrations e seed
 
-### Cartões de Crédito
-Importação de faturas via CSV (formato Inter) e OFX. Deduplicação automática ao reimportar o mesmo mês. Detecção de parcelas (`Parcela X/Y`) com projeção dos meses seguintes. Resumo de parcelas ativas.
+O isolamento de dados e feito por `Household`. Usuarios pertencem a uma casa, e as entidades compartilhadas do planejamento usam `householdId`. As transacoes continuam ligadas ao dono via `userId`, com regras de visibilidade baseadas em `ownership` e `isSecret`.
 
-### Divisão de Despesas
-Calculadora de divisão com toggle entre **50/50** e **proporcional à renda**. Mostra a parte de cada um nas despesas conjuntas e o saldo livre individual.
+As rotas mais centrais estao caminhando para um padrao mais profissional:
 
-### Metas
-Acompanhamento da reserva de emergência (R$ 45.000). Barra de progresso, projeção de conclusão e histórico de alocações mensais.
+- validacao de payload com `zod`
+- route handlers mais finos
+- servicos de dominio em `src/modules`
+- validacao centralizada de ambiente
+- fechamento mensal e importacao tratados como fluxos de dominio, nao apenas handlers HTTP
 
-### Fechar Mês
-Wizard de 3 etapas: revisar lançamentos, alocar valor para a meta, confirmar e rolar saldo para o próximo mês. Projeção de fluxo de caixa de 12 meses. Meses fechados podem ser reabertos para ajustes.
+Para uma visao mais tecnica da organizacao do backend, veja [docs/architecture.md](./docs/architecture.md).
 
-### Créditos PJ
-Gestão de recebíveis de trabalhos extras/clientes. Status por crédito: Recebido, Pendente ou Futuro.
+## Seguranca atual
 
-### Despesas Recorrentes
-Cadastro de templates (aluguel, água, luz, internet etc.) que geram lançamentos automaticamente a cada mês.
+O repositorio ja inclui uma base importante de seguranca:
 
-## Regras de Visibilidade
+- autenticacao com NextAuth
+- senhas com bcrypt
+- middleware protegendo rotas autenticadas
+- tentativas de login persistidas em banco
+- rate limit de login por email + IP
+- comparacao dummy hash para reduzir enumeracao por timing
+- scoping por `household` nas rotas mais importantes
 
-- **Gastos individuais**: visíveis apenas para o dono
-- **Gastos conjuntos**: visíveis para ambos os usuários
-- **Edição/exclusão**: apenas o dono da transação ou o admin
+Ainda assim, trate o projeto como software em evolucao. Antes de expor em producao para internet aberta, vale manter uma revisao de seguranca e regressao a cada mudanca importante.
 
-## Segurança
+Tambem existe uma politica inicial em [SECURITY.md](./SECURITY.md).
+Se voce quiser receber contribuicoes externas, veja tambem [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-- Autenticação com bcrypt (cost 10) e JWT
-- Rate limiting no login: 5 tentativas → bloqueio de 30 min
-- Prisma com queries parametrizadas (sem SQL injection)
-- React escapa outputs por padrão (sem XSS)
-- CSRF gerenciado automaticamente pelo NextAuth
+## Rodando localmente
 
-## Instalação
+### Pre-requisitos
+
+- Node `22.x`
+- PostgreSQL acessivel pela sua maquina
+
+Se quiser usar a mesma versao de Node do projeto:
 
 ```bash
-# Instalar dependências
-npm install
-
-# Gerar o Prisma Client
-npx prisma generate
-
-# Criar o banco e aplicar o schema
-npx prisma db push
-
-# Popular com dados iniciais
-npx tsx prisma/seed.ts
-
-# Iniciar o servidor de desenvolvimento
-npm run dev
+nvm use
 ```
 
-Acesse: http://localhost:3000
+### 1. Instale as dependencias
 
-## Variáveis de Ambiente
+```bash
+npm install
+```
 
-Copie `.env.example` para `.env` e ajuste:
+### 2. Configure o ambiente
+
+Use o arquivo de exemplo:
+
+```bash
+cp .env.example .env
+```
+
+Variaveis esperadas:
 
 ```env
-DATABASE_URL="file:./dev.db"
-NEXTAUTH_SECRET="gere-com: openssl rand -base64 32"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/fincontrol?schema=public"
+NEXTAUTH_SECRET="replace-with-a-32-plus-character-secret-value"
 NEXTAUTH_URL="http://localhost:3000"
 ```
 
-## Scripts
+Para gerar um secret forte:
 
-| Comando | Descrição |
-|---------|-----------|
-| `npm run dev` | Servidor de desenvolvimento |
-| `npm run build` | Build de produção |
-| `npm run start` | Servidor de produção |
-| `npm run db:push` | Aplicar schema no banco |
-| `npm run db:seed` | Popular banco com dados iniciais |
-| `npm run db:studio` | Abrir Prisma Studio (GUI do banco) |
-
-## Deploy (Vercel)
-
-Para deploy na Vercel, será necessário trocar o SQLite por um banco hospedado (ex: PostgreSQL via [Neon](https://neon.tech) — free tier). Altere o `provider` no `prisma/schema.prisma` e a `DATABASE_URL` no `.env`.
-
-## Estrutura do Projeto
-
+```bash
+openssl rand -base64 32
 ```
-src/
-├── app/
-│   ├── (app)/              # Páginas autenticadas
-│   │   ├── dashboard/
-│   │   ├── lancamentos/
-│   │   ├── cartoes/
-│   │   ├── divisao/
-│   │   ├── metas/
-│   │   ├── fechar-mes/
-│   │   └── creditos/
-│   ├── api/                # Rotas de API
-│   │   ├── auth/
-│   │   ├── transactions/
-│   │   ├── cards/
-│   │   ├── import/
-│   │   ├── goals/
-│   │   ├── months/
-│   │   ├── settings/
-│   │   ├── recurring/
-│   │   ├── creditos/
-│   │   ├── projection/
-│   │   └── dashboard/
-│   └── login/
-├── components/
-│   ├── ui/                 # Componentes base (Button, Card, Badge, Modal, Progress)
-│   ├── sidebar.tsx
-│   ├── theme-provider.tsx
-│   └── providers.tsx
-├── lib/
-│   ├── prisma.ts
-│   ├── auth-options.ts
-│   └── utils.ts
-└── middleware.ts
+
+### 3. Gere o client do Prisma e suba o banco
+
+Fluxo simples:
+
+```bash
+npm run generate
+npm run db:push
+npm run db:seed
 ```
+
+### 4. Inicie o app
+
+```bash
+npm run dev
+```
+
+Abra [http://localhost:3000](http://localhost:3000).
+
+## Credenciais do seed
+
+O seed atual cria tres usuarios de desenvolvimento:
+
+- `usuario1@fincontrol.local` / `Seed@2026!`
+- `usuario2@fincontrol.local` / `Seed@2026!`
+- `isolado@fincontrol.local` / `Seed@2026!`
+
+O terceiro usuario fica em outro `household` e serve para validar isolamento de dados localmente.
+
+## Scripts uteis
+
+- `npm run dev`: sobe o app em desenvolvimento
+- `npm run build`: gera build de producao
+- `npm run start`: sobe a build
+- `npm run lint`: roda o lint do Next.js
+- `npm run typecheck`: valida tipos TypeScript
+- `npm run generate`: gera o Prisma Client
+- `npm run vercel-build`: gera client, aplica migrations e faz o build pensado para Vercel
+- `npm run db:push`: sincroniza o schema com o banco
+- `npm run db:seed`: popula o banco com dados de exemplo
+- `npm run db:studio`: abre o Prisma Studio
+- `npm run ci`: roda o conjunto minimo usado na CI
+
+## Rotas principais
+
+- `/dashboard`
+- `/lancamentos`
+- `/cartoes`
+- `/divisao`
+- `/metas`
+- `/fechar-mes`
+- `/creditos`
+- `/login`
+
+## API em alto nivel
+
+- `/api/auth/[...nextauth]`
+- `/api/transactions`
+- `/api/cards`
+- `/api/import`
+- `/api/dashboard`
+- `/api/months`
+- `/api/goals`
+- `/api/settings`
+- `/api/recurring`
+- `/api/projection`
+- `/api/creditos`
+
+## Estrutura resumida
+
+```txt
+fincontrol/
+  .github/
+    workflows/
+  docs/
+  prisma/
+  src/
+    app/
+      (app)/
+      api/
+      login/
+    components/
+    lib/
+    modules/
+    types/
+```
+
+## Deploy
+
+O projeto ja usa PostgreSQL no Prisma, entao o caminho mais direto para deploy e:
+
+1. provisionar um banco PostgreSQL hospedado
+2. configurar `DATABASE_URL`, `NEXTAUTH_SECRET` e `NEXTAUTH_URL`
+3. importar o repositório no Vercel
+4. deixar o projeto privado no dashboard do Vercel
+5. usar o build configurado em `vercel.json`
+
+Exemplo de passo de build:
+
+```bash
+npx prisma generate && npx prisma migrate deploy && next build
+```
+
+Guia detalhado: [docs/deploy-vercel.md](./docs/deploy-vercel.md).
+
+## Limites atuais
+
+- sem testes automatizados no repositorio
+- autenticacao apenas por credenciais
+- sem integracao com Open Banking
+- produto ainda muito orientado ao caso de uso pessoal/familiar
