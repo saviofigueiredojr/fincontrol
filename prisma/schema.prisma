@@ -17,6 +17,8 @@ model Household {
   recurringTemplates RecurringTemplate[]
   settings           Setting[]
   pjReceipts         PjReceipt[]
+  pjRetainers        PjRetainer[]
+  pjTaxRate          Float?              @default(6.0)
   createdAt          DateTime            @default(now())
 }
 
@@ -181,8 +183,27 @@ model PjReceipt {
   household     Household    @relation(fields: [householdId], references: [id])
   transactionId String?      @unique
   transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  retainerId    String?
+  retainer      PjRetainer?  @relation(fields: [retainerId], references: [id])
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+
+  @@index([householdId])
+}
+
+model PjRetainer {
+  id          String   @id @default(cuid())
+  householdId String
+  clientName  String
+  description String
+  amount      Float
+  dueDay      Int
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household   Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  receipts    PjReceipt[]
 
   @@index([householdId])
 }

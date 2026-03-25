@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
+import { PjAutomationService } from "@/modules/pj/pj-automation.service";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export async function PATCH(
 
         // Se estiver mudando para pago e ainda não tem transação atrelada
         if (status === "paid" && existing.status !== "paid" && !existing.transactionId) {
+            // 1. Gera a transação de entrada consolidada
             const transaction = await prisma.transaction.create({
                 data: {
                     date: new Date(), // Usa a data da conciliação (hoje)
@@ -52,6 +54,30 @@ export async function PATCH(
                 }
             });
             transactionId = transaction.id;
+
+            // 2. Calcula e provisiona automático eventuais impostos (Retenções/Simples)
+            const household = await prisma.household.findUnique({
+                where: { id: existing.householdId },
+                select: { pjTaxRate: true }
+            });
+
+            const taxAmount = PjAutomationService.calculateTaxProvision(existing.amount, household?.pjTaxRate);
+
+            if (taxAmount > 0) {
+                await prisma.transaction.create({
+                    data: {
+                        date: new Date(), // Vence no mês corrente para não esquecer de pagar a guia
+                        competencia: existing.competencia,
+                        description: `Imposto B2B (Simples/DAS) - ${existing.clientName}`,
+                        category: "Impostos PJ",
+                        amount: taxAmount,
+                        type: "expense",
+                        ownership: "mine",
+                        source: "credito_pj",
+                        userId: existing.userId,
+                    }
+                });
+            }
         }
 
         const updated = await prisma.pjReceipt.update({
