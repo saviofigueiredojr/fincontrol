@@ -16,6 +16,7 @@ model Household {
   monthCloses        MonthClose[]
   recurringTemplates RecurringTemplate[]
   settings           Setting[]
+  pjReceipts         PjReceipt[]
   createdAt          DateTime            @default(now())
 }
 
@@ -30,6 +31,7 @@ model User {
   createdAt    DateTime      @default(now())
   transactions Transaction[]
   creditCards  CreditCard[]
+  pjReceipts   PjReceipt[]
 
   @@index([householdId])
 }
@@ -54,6 +56,7 @@ model Transaction {
   userId             String
   user               User           @relation(fields: [userId], references: [id])
   cardStatement      CardStatement? @relation(fields: [cardStatementId], references: [id])
+  pjReceipt          PjReceipt?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -162,4 +165,24 @@ model LoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([email, ip, createdAt])
+}
+
+model PjReceipt {
+  id            String       @id @default(cuid())
+  clientName    String
+  description   String
+  amount        Float
+  dueDate       DateTime
+  status        String       @default("unissued") // unissued, issued, pending, paid
+  competencia   String // YYYY-MM
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  householdId   String
+  household     Household    @relation(fields: [householdId], references: [id])
+  transactionId String?      @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([householdId])
 }

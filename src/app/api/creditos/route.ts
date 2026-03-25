@@ -4,9 +4,6 @@ import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
 
-const CREDITO_CATEGORY = "Crédito PJ";
-const CREDITO_SOURCE = "credito_pj";
-
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -17,60 +14,19 @@ export async function GET() {
     }
 
     const userId = (session.user as { id: string }).id;
-    const { householdId, memberIds } = await getHouseholdForUser(userId);
+    const { memberIds } = await getHouseholdForUser(userId);
 
-    // Get all credito transactions (household scoped)
-    const transactions = await prisma.transaction.findMany({
+    const receipts = await prisma.pjReceipt.findMany({
       where: {
         userId: { in: memberIds },
-        category: CREDITO_CATEGORY,
-        source: CREDITO_SOURCE,
       },
-      orderBy: { date: "desc" },
+      orderBy: { dueDate: "asc" },
+      include: {
+        transaction: true
+      }
     });
 
-    // Get status settings for each transaction (household scoped)
-    const statusKeys = transactions.map((t) => `credito_status_${t.id}`);
-    const statusSettings = statusKeys.length > 0
-      ? await prisma.setting.findMany({
-        where: { householdId, key: { in: statusKeys } },
-      })
-      : [];
-
-    const statusMap = new Map(
-      statusSettings.map((s) => [s.key, s.value])
-    );
-
-    // Enrich transactions with status
-    const enrichedTransactions = transactions.map((t) => ({
-      ...t,
-      status: statusMap.get(`credito_status_${t.id}`) || "pending",
-    }));
-
-    // Group by description (client name)
-    const grouped: Record<
-      string,
-      {
-        clientName: string;
-        totalAmount: number;
-        transactions: typeof enrichedTransactions;
-      }
-    > = {};
-
-    for (const tx of enrichedTransactions) {
-      const clientName = tx.description;
-      if (!grouped[clientName]) {
-        grouped[clientName] = {
-          clientName,
-          totalAmount: 0,
-          transactions: [],
-        };
-      }
-      grouped[clientName].totalAmount += tx.amount;
-      grouped[clientName].transactions.push(tx);
-    }
-
-    return NextResponse.json(Object.values(grouped));
+    return NextResponse.json({ credits: receipts });
   } catch (error) {
     console.error("List creditos error:", error);
     return NextResponse.json(
@@ -91,7 +47,7 @@ export async function POST(request: NextRequest) {
     const { householdId } = await getHouseholdForUser(userId);
     const body = await request.json();
 
-    const { clientName, description, amount, dueDate, status = "pending" } = body;
+    const { clientName, description, amount, dueDate, status = "unissued", competencia } = body;
 
     if (!clientName || !amount || !dueDate) {
       return NextResponse.json(
@@ -104,53 +60,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "amount deve ser um número positivo" }, { status: 400 });
     }
 
-    if (!["received", "pending", "future"].includes(status)) {
-      return NextResponse.json(
-        { error: "status deve ser received, pending ou future" },
-        { status: 400 }
-      );
-    }
-
     const parsedDate = new Date(dueDate);
     if (isNaN(parsedDate.getTime())) {
       return NextResponse.json({ error: "Data inválida" }, { status: 400 });
     }
 
-    const competencia = `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
+    let comp = competencia;
+    if (!comp) {
+      comp = `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
+    }
 
-    const transaction = await prisma.transaction.create({
+    const receipt = await prisma.pjReceipt.create({
       data: {
-        date: parsedDate,
-        competencia,
-        description: clientName,
-        category: CREDITO_CATEGORY,
+        clientName,
+        description: description || "Crédito PJ",
         amount,
-        type: "income",
-        ownership: "mine",
-        source: CREDITO_SOURCE,
+        dueDate: parsedDate,
+        status,
+        competencia: comp,
         userId,
-      },
-    });
-
-    // Store status as a setting (household scoped, compound key)
-    await prisma.setting.upsert({
-      where: { householdId_key: { householdId, key: `credito_status_${transaction.id}` } },
-      create: {
-        key: `credito_status_${transaction.id}`,
-        value: status,
         householdId,
       },
-      update: { value: status },
     });
 
-    return NextResponse.json(
-      {
-        ...transaction,
-        status,
-        detail: description || null,
-      },
-      { status: 201 }
-    );
+    return NextResponse.json(receipt, { status: 201 });
   } catch (error) {
     console.error("Create credito error:", error);
     return NextResponse.json(

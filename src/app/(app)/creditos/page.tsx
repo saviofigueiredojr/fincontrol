@@ -9,6 +9,9 @@ import {
   Clock,
   CheckCircle,
   CalendarClock,
+  FileClock,
+  FileCheck,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,7 @@ import {
   DialogClose,
 } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { isPast, startOfDay } from "date-fns";
 
 interface Credit {
   id: string;
@@ -28,7 +32,7 @@ interface Credit {
   description: string;
   amount: number;
   dueDate: string;
-  status: "received" | "pending" | "future";
+  status: "unissued" | "issued" | "pending" | "paid";
 }
 
 function toFiniteNumber(value: unknown): number {
@@ -37,45 +41,18 @@ function toFiniteNumber(value: unknown): number {
 }
 
 function normalizeStatus(value: unknown): Credit["status"] {
-  if (value === "received" || value === "pending" || value === "future") return value;
+  if (value === "unissued" || value === "issued" || value === "pending" || value === "paid") return value;
+  // Fallbacks
+  if (value === "future") return "unissued";
+  if (value === "received") return "paid";
   return "pending";
 }
 
-function normalizeCredits(payload: any): Credit[] {
-  if (!Array.isArray(payload)) return [];
-
-  // API can return grouped items: { clientName, transactions: [...] }
-  if (payload.some((item) => Array.isArray(item?.transactions))) {
-    return payload.flatMap((group: any) => {
-      const clientName = String(group?.clientName ?? "Cliente");
-      const txs = Array.isArray(group?.transactions) ? group.transactions : [];
-
-      return txs.map((tx: any) => ({
-        id: String(tx?.id ?? `${clientName}-${tx?.date ?? Math.random()}`),
-        clientName,
-        description: String(tx?.detail ?? tx?.description ?? clientName),
-        amount: toFiniteNumber(tx?.amount),
-        dueDate: String(tx?.dueDate ?? tx?.date ?? new Date().toISOString()),
-        status: normalizeStatus(tx?.status),
-      }));
-    });
-  }
-
-  // Flat fallback shape
-  return payload.map((item: any) => ({
-    id: String(item?.id ?? ""),
-    clientName: String(item?.clientName ?? item?.description ?? "Cliente"),
-    description: String(item?.description ?? item?.detail ?? "Crédito"),
-    amount: toFiniteNumber(item?.amount),
-    dueDate: String(item?.dueDate ?? item?.date ?? new Date().toISOString()),
-    status: normalizeStatus(item?.status),
-  }));
-}
-
-const STATUS_CONFIG: Record<string, { label: string; variant: "success" | "warning" | "default"; icon: typeof CheckCircle }> = {
-  received: { label: "Recebido", variant: "success", icon: CheckCircle },
+const STATUS_CONFIG: Record<Credit["status"], { label: string; variant: "success" | "warning" | "default" | "secondary"; icon: any }> = {
+  unissued: { label: "Falta Emitir", variant: "secondary", icon: FileClock },
+  issued: { label: "NF Emitida", variant: "default", icon: FileCheck },
   pending: { label: "Pendente", variant: "warning", icon: Clock },
-  future: { label: "Futuro", variant: "default", icon: CalendarClock },
+  paid: { label: "Pago", variant: "success", icon: CheckCircle },
 };
 
 const emptyForm = {
@@ -83,7 +60,7 @@ const emptyForm = {
   description: "",
   amount: "",
   dueDate: new Date().toISOString().split("T")[0],
-  status: "pending" as "received" | "pending" | "future",
+  status: "unissued" as Credit["status"],
 };
 
 export default function CreditosPage() {
@@ -103,7 +80,18 @@ export default function CreditosPage() {
       const res = await fetch("/api/creditos");
       if (!res.ok) throw new Error("Erro ao carregar creditos");
       const json = await res.json();
-      setCredits(normalizeCredits(json.credits ?? json));
+
+      const payload = json.credits ?? [];
+      const parsed = payload.map((item: any) => ({
+        id: String(item.id),
+        clientName: String(item.clientName),
+        description: String(item.description),
+        amount: toFiniteNumber(item.amount),
+        dueDate: String(item.dueDate),
+        status: normalizeStatus(item.status),
+      }));
+
+      setCredits(parsed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -140,9 +128,35 @@ export default function CreditosPage() {
     }
   };
 
-  const totalReceived = credits.filter((c) => c.status === "received").reduce((s, c) => s + c.amount, 0);
-  const totalPending = credits.filter((c) => c.status === "pending").reduce((s, c) => s + c.amount, 0);
-  const totalFuture = credits.filter((c) => c.status === "future").reduce((s, c) => s + c.amount, 0);
+  const handleStatusChange = async (id: string, newStatus: Credit["status"]) => {
+    try {
+      const res = await fetch(`/api/creditos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error("Erro ao atualizar status");
+      fetchData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao atualizar");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Tem certeza que deseja apagar este registro?")) return;
+    try {
+      const res = await fetch(`/api/creditos/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Erro ao excluir");
+      fetchData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao excluir");
+    }
+  };
+
+  const totalPaid = credits.filter((c) => c.status === "paid").reduce((s, c) => s + c.amount, 0);
+  const totalPending = credits.filter((c) => ["unissued", "issued", "pending"].includes(c.status)).reduce((s, c) => s + c.amount, 0);
 
   // Group credits by client
   const clientGroups = credits.reduce<Record<string, Credit[]>>((acc, credit) => {
@@ -173,41 +187,31 @@ export default function CreditosPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Creditos PJ</h1>
+        <h1 className="text-2xl font-bold">Créditos PJ</h1>
         <Button onClick={() => { setForm(emptyForm); setModalOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Novo Credito
+          <Plus className="h-4 w-4 mr-1" /> Novo Faturamento
         </Button>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Recebido</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Recebido (Pago)</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-green-600">{formatCurrency(totalReceived)}</p>
+            <p className="text-2xl font-bold text-green-600">{formatCurrency(totalPaid)}</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Pendente</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total A Receber (Aberto)</CardTitle>
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-yellow-600">{formatCurrency(totalPending)}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Futuro</CardTitle>
-            <CalendarClock className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold text-primary">{formatCurrency(totalFuture)}</p>
           </CardContent>
         </Card>
       </div>
@@ -222,7 +226,7 @@ export default function CreditosPage() {
         </Card>
       ) : (
         Object.entries(clientGroups).map(([client, clientCredits]) => {
-          const clientTotal = clientCredits.reduce((s, c) => s + c.amount, 0);
+          const clientTotal = clientCredits.filter(c => c.status !== "paid").reduce((s, c) => s + c.amount, 0);
           return (
             <Card key={client}>
               <CardHeader>
@@ -231,7 +235,7 @@ export default function CreditosPage() {
                     <Briefcase className="h-4 w-4 text-primary" />
                     {client}
                   </CardTitle>
-                  <Badge variant="outline">{formatCurrency(clientTotal)}</Badge>
+                  <p className="text-sm text-muted-foreground">Aberto: <Badge variant="outline">{formatCurrency(clientTotal)}</Badge></p>
                 </div>
               </CardHeader>
               <CardContent>
@@ -239,24 +243,52 @@ export default function CreditosPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-3 px-2 font-medium text-muted-foreground">Descricao</th>
+                        <th className="text-left py-3 px-2 font-medium text-muted-foreground">Descrição</th>
                         <th className="text-right py-3 px-2 font-medium text-muted-foreground">Valor</th>
-                        <th className="text-right py-3 px-2 font-medium text-muted-foreground">Vencimento</th>
-                        <th className="text-center py-3 px-2 font-medium text-muted-foreground">Status</th>
+                        <th className="text-right py-3 px-2 font-medium text-muted-foreground">Previsão</th>
+                        <th className="text-center py-3 px-2 font-medium text-muted-foreground">Etapa</th>
+                        <th className="text-right py-3 px-2 font-medium text-muted-foreground">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
                       {clientCredits.map((credit) => {
-                        const config = STATUS_CONFIG[credit.status];
+                        const dueDateObj = new Date(credit.dueDate);
+                        // Check if it's late: past due date AND not paid
+                        const isLate = credit.status !== "paid" && isPast(startOfDay(dueDateObj));
+
                         return (
                           <tr key={credit.id} className="border-b last:border-0 hover:bg-muted/50">
-                            <td className="py-3 px-2">{credit.description}</td>
+                            <td className="py-3 px-2">
+                              <div className="flex items-center gap-2">
+                                {isLate && <span title="Atrasado"><AlertTriangle className="h-4 w-4 text-red-500" /></span>}
+                                <span className={isLate ? "text-red-500 font-medium" : ""}>{credit.description}</span>
+                              </div>
+                            </td>
                             <td className="py-3 px-2 text-right font-medium">{formatCurrency(credit.amount)}</td>
                             <td className="py-3 px-2 text-right text-muted-foreground">
                               {formatDate(credit.dueDate)}
                             </td>
                             <td className="py-3 px-2 text-center">
-                              <Badge variant={config.variant}>{config.label}</Badge>
+                              <select
+                                value={credit.status}
+                                onChange={(e) => handleStatusChange(credit.id, e.target.value as Credit["status"])}
+                                className={`text-xs rounded-full px-2 py-1 border font-semibold w-full max-w-[140px] text-center cursor-pointer outline-none focus:ring-1 focus:ring-ring
+                                  ${credit.status === 'paid' ? 'bg-green-100 text-green-800 border-green-200' : ''}
+                                  ${credit.status === 'pending' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : ''}
+                                  ${credit.status === 'issued' ? 'bg-blue-100 text-blue-800 border-blue-200' : ''}
+                                  ${credit.status === 'unissued' ? 'bg-gray-100 text-gray-800 border-gray-200' : ''}
+                                `}
+                              >
+                                <option value="unissued">Falta Emitir</option>
+                                <option value="issued">NF Emitida</option>
+                                <option value="pending">Pendente</option>
+                                <option value="paid">Pago</option>
+                              </select>
+                            </td>
+                            <td className="py-3 px-2 text-right">
+                              <Button variant="ghost" size="sm" onClick={() => handleDelete(credit.id)} className="h-7 text-red-500 hover:text-red-600 hover:bg-red-50">
+                                Excluir
+                              </Button>
                             </td>
                           </tr>
                         );
@@ -274,7 +306,7 @@ export default function CreditosPage() {
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Novo Credito PJ</DialogTitle>
+            <DialogTitle>Novo Faturamento PJ</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
             <div>
@@ -289,7 +321,7 @@ export default function CreditosPage() {
             </div>
 
             <div>
-              <label className="text-sm font-medium mb-1 block">Descricao</label>
+              <label className="text-sm font-medium mb-1 block">Descricao / Projeto</label>
               <input
                 type="text"
                 placeholder="Ex: Consultoria Março/2026"
@@ -313,7 +345,7 @@ export default function CreditosPage() {
             </div>
 
             <div>
-              <label className="text-sm font-medium mb-1 block">Vencimento</label>
+              <label className="text-sm font-medium mb-1 block">Vencimento (Previsão)</label>
               <input
                 type="date"
                 value={form.dueDate}
@@ -323,15 +355,16 @@ export default function CreditosPage() {
             </div>
 
             <div>
-              <label className="text-sm font-medium mb-1 block">Status</label>
+              <label className="text-sm font-medium mb-1 block">Etapa Atual</label>
               <select
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value as any })}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               >
-                <option value="received">Recebido</option>
-                <option value="pending">Pendente</option>
-                <option value="future">Futuro</option>
+                <option value="unissued">Falta Emitir</option>
+                <option value="issued">NF Emitida</option>
+                <option value="pending">Pagamento Pendente</option>
+                <option value="paid">Pago</option>
               </select>
             </div>
 
@@ -344,7 +377,7 @@ export default function CreditosPage() {
                 disabled={saving || !form.clientName || !form.description || !form.amount}
               >
                 {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
-                Criar
+                Salvar
               </Button>
             </div>
           </div>
