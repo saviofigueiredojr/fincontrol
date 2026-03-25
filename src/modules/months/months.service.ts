@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { CloseMonthInput } from "./months.schemas";
+import { SettleUpService } from "../closing/settleup.service";
 
 type DatabaseClient = typeof prisma | Prisma.TransactionClient;
 
@@ -195,10 +196,25 @@ export async function getMonthSummary(actor: MonthActor, competencia: string) {
     return existingMonthClose;
   }
 
-  const [{ totalIncome, totalExpense }, openingBalance] = await Promise.all([
+  const [{ totalIncome, totalExpense }, openingBalance, transactions] = await Promise.all([
     getTransactionTotals(prisma, actor.memberIds, competencia),
     getOpeningBalance(prisma, actor.householdId, competencia),
+    prisma.transaction.findMany({
+      where: { userId: { in: actor.memberIds }, competencia },
+      select: { userId: true, amount: true, type: true, ownership: true },
+    })
   ]);
+
+  const contributions = actor.memberIds.map(userId => {
+    const userTxs = transactions.filter(t => t.userId === userId);
+    return {
+      userId,
+      totalIncome: userTxs.filter(t => t.type === "income").reduce((acc, t) => acc + t.amount, 0),
+      totalJointExpensesPaid: userTxs.filter(t => t.type === "expense" && t.ownership === "joint").reduce((acc, t) => acc + t.amount, 0),
+    };
+  });
+
+  const settleUp = SettleUpService.calculateSettlement(contributions, "proportional");
 
   return {
     competencia,
@@ -209,6 +225,7 @@ export async function getMonthSummary(actor: MonthActor, competencia: string) {
     closingBalance: openingBalance + totalIncome - totalExpense,
     status: "open",
     closedAt: null,
+    settleUp
   };
 }
 
@@ -224,10 +241,29 @@ export async function closeMonth(actor: MonthActor, input: CloseMonthInput) {
       return { kind: "already_closed" as const };
     }
 
-    const [{ totalIncome, totalExpense }, openingBalance] = await Promise.all([
+    const [{ totalIncome, totalExpense }, openingBalance, transactions] = await Promise.all([
       getTransactionTotals(db, actor.memberIds, input.competencia),
       getOpeningBalance(db, actor.householdId, input.competencia),
+      db.transaction.findMany({
+        where: { userId: { in: actor.memberIds }, competencia: input.competencia },
+        select: { userId: true, amount: true, type: true, ownership: true },
+      })
     ]);
+
+    const contributions = actor.memberIds.map(userId => {
+      const userTxs = transactions.filter(t => t.userId === userId);
+      return {
+        userId,
+        totalIncome: userTxs.filter(t => t.type === "income").reduce((acc, t) => acc + t.amount, 0),
+        totalJointExpensesPaid: userTxs.filter(t => t.type === "expense" && t.ownership === "joint").reduce((acc, t) => acc + t.amount, 0),
+      };
+    });
+
+    // Automatic Debt transaction creation for the next month
+    const settleUp = SettleUpService.calculateSettlement(contributions, "proportional");
+
+    // We intentionally do NOT create formal transactions right away as it's better kept as a recommendation for now.
+    // However, if the user requested it, we could insert a pending "Transferência" here.
 
     const closingBalance = openingBalance + totalIncome - totalExpense;
 

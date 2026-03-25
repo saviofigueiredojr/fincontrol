@@ -51,6 +51,10 @@ interface MonthData {
   goalSuggestion: number;
   currentGoalAmount: number;
   goalTarget: number;
+  settleUp?: {
+    targetContributions: { userId: string; targetAmount: number; actualPaid: number; balance: number }[];
+    settlements: { fromUserId: string; toUserId: string; amount: number }[];
+  };
 }
 
 interface ProjectionPoint {
@@ -68,8 +72,8 @@ function normalizeMonthData(monthPayload: any, txPayload: any, competencia: stri
   const txList = Array.isArray(txPayload?.transactions)
     ? txPayload.transactions
     : Array.isArray(txPayload)
-    ? txPayload
-    : [];
+      ? txPayload
+      : [];
 
   const categoryMap = new Map<string, CategorySummary>();
   let txIncome = 0;
@@ -107,6 +111,7 @@ function normalizeMonthData(monthPayload: any, txPayload: any, competencia: stri
     goalSuggestion: toFiniteNumber(monthPayload?.goalSuggestion ?? monthPayload?.metaAllocation ?? 1200.00),
     currentGoalAmount: toFiniteNumber(monthPayload?.currentGoalAmount ?? 0),
     goalTarget: toFiniteNumber(monthPayload?.goalTarget ?? 30000),
+    settleUp: monthPayload?.settleUp,
   };
 }
 
@@ -121,8 +126,8 @@ function normalizeProjectionPoints(payload: any, monthlyMeta: number): Projectio
       typeof point?.label === "string" && point.label
         ? point.label
         : /^\d{4}-\d{2}$/.test(competencia)
-        ? competenciaToLabel(competencia)
-        : `M${index + 1}`;
+          ? competenciaToLabel(competencia)
+          : `M${index + 1}`;
 
     cumulativeMeta += monthlyMeta;
 
@@ -334,13 +339,12 @@ export default function FecharMesPage() {
                 <div key={s.num} className="flex items-center">
                   <button
                     onClick={() => setStep(s.num)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                      step === s.num
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${step === s.num
                         ? "bg-primary text-primary-foreground"
                         : step > s.num
-                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                        : "bg-muted text-muted-foreground"
-                    }`}
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          : "bg-muted text-muted-foreground"
+                      }`}
                   >
                     <s.icon className="h-4 w-4" />
                     {s.label}
@@ -408,17 +412,39 @@ export default function FecharMesPage() {
                 </CardContent>
               </Card>
 
-              {/* Saldo */}
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold">Saldo do Mes</span>
-                    <span className={`text-2xl font-bold ${monthData.saldo >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {/* Saldo e Settle Up */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader><CardTitle>Saldo do Mês</CardTitle></CardHeader>
+                  <CardContent className="pt-2">
+                    <span className={`text-3xl font-bold ${monthData.saldo >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                       {formatCurrency(monthData.saldo)}
                     </span>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {monthData.settleUp && monthData.settleUp.settlements.length > 0 && (
+                  <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-amber-700 dark:text-amber-500 text-base">Acerto de Contas (Settle Up)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2 text-sm text-muted-foreground">
+                        {monthData.settleUp.settlements.map((s, idx) => (
+                          <li key={idx} className="flex justify-between items-center bg-background/60 p-2 rounded-md border">
+                            <span>User <span className="font-semibold text-foreground">{s.fromUserId.slice(0, 4)}</span> deve pagar</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(s.amount)}</span>
+                            <span>para User <span className="font-semibold text-foreground">{s.toUserId.slice(0, 4)}</span></span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs pt-3 text-amber-600/70">
+                        *Proporcional basado na divisão de renda do mês
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
 
               <div className="flex justify-end">
                 <Button onClick={() => setStep(2)}>
