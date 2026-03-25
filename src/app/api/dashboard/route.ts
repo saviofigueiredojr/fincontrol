@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,15 +24,17 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = (session.user as { id: string }).id;
+    const { householdId, memberIds } = await getHouseholdForUser(userId);
 
     // 1. Totals for the given competencia
-    // Show: user's own transactions + joint transactions
+    // Visibility: household members only, excluding partner's secret transactions
     const transactions = await prisma.transaction.findMany({
       where: {
         competencia,
+        userId: { in: memberIds },
         OR: [
-          { userId },
-          { ownership: "joint" },
+          { isSecret: false },
+          { isSecret: true, userId },
         ],
       },
     });
@@ -56,9 +61,10 @@ export async function GET(request: NextRequest) {
     const chartTransactions = await prisma.transaction.findMany({
       where: {
         competencia: { in: chartMonths },
+        userId: { in: memberIds },
         OR: [
-          { userId },
-          { ownership: "joint" },
+          { isSecret: false },
+          { isSecret: true, userId },
         ],
       },
       select: { competencia: true, type: true, amount: true },
@@ -91,7 +97,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 5)
       .map(([category, amount]) => ({ category, amount }));
 
-    // 4. Active installments count
+    // 4. Active installments count (household scoped)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -99,16 +105,20 @@ export async function GET(request: NextRequest) {
       where: {
         installmentTotal: { not: null },
         date: { gte: today },
+        userId: { in: memberIds },
         OR: [
-          { userId },
-          { ownership: "joint" },
+          { isSecret: false },
+          { isSecret: true, userId },
         ],
       },
     });
 
-    // 5. Budget progress per category
+    // 5. Budget progress per category (household scoped)
     const budgetSettings = await prisma.setting.findMany({
-      where: { key: { startsWith: "budget_" } },
+      where: {
+        householdId,
+        key: { startsWith: "budget_" },
+      },
     });
 
     const budgetProgress = budgetSettings.map((s) => {

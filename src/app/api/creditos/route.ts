@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
 
 const CREDITO_CATEGORY = "Crédito PJ";
 const CREDITO_SOURCE = "credito_pj";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
@@ -14,23 +17,24 @@ export async function GET() {
     }
 
     const userId = (session.user as { id: string }).id;
+    const { householdId, memberIds } = await getHouseholdForUser(userId);
 
-    // Get all credito transactions
+    // Get all credito transactions (household scoped)
     const transactions = await prisma.transaction.findMany({
       where: {
-        userId,
+        userId: { in: memberIds },
         category: CREDITO_CATEGORY,
         source: CREDITO_SOURCE,
       },
       orderBy: { date: "desc" },
     });
 
-    // Get status settings for each transaction
+    // Get status settings for each transaction (household scoped)
     const statusKeys = transactions.map((t) => `credito_status_${t.id}`);
     const statusSettings = statusKeys.length > 0
       ? await prisma.setting.findMany({
-          where: { key: { in: statusKeys } },
-        })
+        where: { householdId, key: { in: statusKeys } },
+      })
       : [];
 
     const statusMap = new Map(
@@ -84,6 +88,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = (session.user as { id: string }).id;
+    const { householdId } = await getHouseholdForUser(userId);
     const body = await request.json();
 
     const { clientName, description, amount, dueDate, status = "pending" } = body;
@@ -127,12 +132,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Store status as a setting
+    // Store status as a setting (household scoped, compound key)
     await prisma.setting.upsert({
-      where: { key: `credito_status_${transaction.id}` },
+      where: { householdId_key: { householdId, key: `credito_status_${transaction.id}` } },
       create: {
         key: `credito_status_${transaction.id}`,
         value: status,
+        householdId,
       },
       update: { value: status },
     });

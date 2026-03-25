@@ -1,54 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth-options";
-import { prisma } from "@/lib/prisma";
+import { getHouseholdForUser } from "@/lib/household";
+import { getSessionUser } from "@/lib/session-user";
+import { reopenMonthParamsSchema } from "@/modules/months/months.schemas";
+import { reopenMonth } from "@/modules/months/months.service";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: { competencia: string } }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
-    const { competencia } = params;
-
-    if (!/^\d{4}-\d{2}$/.test(competencia)) {
+    const parsedParams = reopenMonthParamsSchema.safeParse(params);
+    if (!parsedParams.success) {
       return NextResponse.json(
         { error: "Formato de competência inválido (YYYY-MM)" },
         { status: 400 }
       );
     }
 
-    const monthClose = await prisma.monthClose.findUnique({
-      where: { competencia },
-    });
+    const { householdId } = await getHouseholdForUser(sessionUser.id);
+    const result = await reopenMonth(householdId, parsedParams.data.competencia);
 
-    if (!monthClose) {
+    if (result.kind === "not_found") {
       return NextResponse.json(
         { error: "Fechamento não encontrado para esta competência" },
         { status: 404 }
       );
     }
 
-    if (monthClose.status === "open") {
+    if (result.kind === "already_open") {
       return NextResponse.json(
         { error: "Este mês já está aberto" },
         { status: 400 }
       );
     }
 
-    const updated = await prisma.monthClose.update({
-      where: { competencia },
-      data: {
-        status: "open",
-        closedAt: null,
-      },
-    });
-
-    return NextResponse.json(updated);
+    return NextResponse.json(result.monthClose);
   } catch (error) {
     console.error("Reopen month error:", error);
     return NextResponse.json(

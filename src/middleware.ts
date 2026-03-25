@@ -6,19 +6,14 @@ export default withAuth({
 
 export const config = {
   matcher: [
-    "/dashboard/:path*",
-    "/lancamentos/:path*",
-    "/cartoes/:path*",
-    "/divisao/:path*",
-    "/metas/:path*",
-    "/fechar-mes/:path*",
-    "/creditos/:path*",
-    "/api/transactions/:path*",
-    "/api/cards/:path*",
-    "/api/goals/:path*",
-    "/api/months/:path*",
-    "/api/settings/:path*",
-    "/api/dashboard/:path*",
-    "/api/import/:path*",
+    /*
+     * Protege TUDO exceto:
+     * - /login
+     * - /api/auth (NextAuth)
+     * - /_next/static, /_next/image (assets do Next.js)
+     * - /favicon.ico
+     * - Arquivos com extensão (fonts, imagens, scripts estáticos, etc.)
+     */
+    "/((?!login|api/auth|_next/static|_next/image|favicon\\.ico|.*\\..*).*)",
   ],
 };
