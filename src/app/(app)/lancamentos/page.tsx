@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Loader2,
   AlertCircle,
+  Lock,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,8 +40,32 @@ interface Transaction {
   type: "income" | "expense";
   ownership: "mine" | "partner" | "joint";
   amount: number;
+  isSecret?: boolean;
   currentInstallment?: number;
   totalInstallments?: number;
+}
+
+function toFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeTransactions(payload: any): Transaction[] {
+  if (!Array.isArray(payload)) return [];
+
+  return payload.map((tx: any) => ({
+    id: String(tx?.id ?? ""),
+    date: String(tx?.date ?? new Date().toISOString()),
+    description: String(tx?.description ?? ""),
+    category: String(tx?.category ?? "Outros"),
+    type: tx?.type === "income" ? "income" : "expense",
+    ownership:
+      tx?.ownership === "partner" ? "partner" : tx?.ownership === "joint" ? "joint" : "mine",
+    amount: toFiniteNumber(tx?.amount),
+    isSecret: !!tx?.isSecret,
+    currentInstallment: tx?.currentInstallment ?? tx?.installmentCurrent ?? undefined,
+    totalInstallments: tx?.totalInstallments ?? tx?.installmentTotal ?? undefined,
+  }));
 }
 
 const CATEGORIES = [
@@ -76,6 +101,7 @@ const emptyForm = {
   amount: "",
   type: "expense" as "income" | "expense",
   ownership: "mine" as "mine" | "partner" | "joint",
+  isSecret: false,
   currentInstallment: "",
   totalInstallments: "",
 };
@@ -113,7 +139,7 @@ export default function LancamentosPage() {
       const res = await fetch(`/api/transactions?${params}`);
       if (!res.ok) throw new Error("Erro ao carregar lancamentos");
       const json = await res.json();
-      setTransactions(json.transactions ?? json);
+      setTransactions(normalizeTransactions(json.transactions ?? json));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -140,6 +166,7 @@ export default function LancamentosPage() {
       amount: String(tx.amount),
       type: tx.type,
       ownership: tx.ownership,
+      isSecret: tx.isSecret ?? false,
       currentInstallment: tx.currentInstallment ? String(tx.currentInstallment) : "",
       totalInstallments: tx.totalInstallments ? String(tx.totalInstallments) : "",
     });
@@ -156,8 +183,9 @@ export default function LancamentosPage() {
         amount: parseFloat(form.amount),
         type: form.type,
         ownership: form.ownership,
-        currentInstallment: form.currentInstallment ? parseInt(form.currentInstallment) : null,
-        totalInstallments: form.totalInstallments ? parseInt(form.totalInstallments) : null,
+        isSecret: form.isSecret,
+        installmentCurrent: form.currentInstallment ? parseInt(form.currentInstallment, 10) : null,
+        installmentTotal: form.totalInstallments ? parseInt(form.totalInstallments, 10) : null,
         competencia,
       };
 
@@ -236,11 +264,10 @@ export default function LancamentosPage() {
                 <button
                   key={opt.value}
                   onClick={() => setOwnershipFilter(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    ownershipFilter === opt.value
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${ownershipFilter === opt.value
                       ? "bg-primary text-primary-foreground"
                       : "bg-background hover:bg-muted"
-                  }`}
+                    }`}
                 >
                   {opt.label}
                 </button>
@@ -257,11 +284,10 @@ export default function LancamentosPage() {
                 <button
                   key={opt.value}
                   onClick={() => setTypeFilter(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    typeFilter === opt.value
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${typeFilter === opt.value
                       ? "bg-primary text-primary-foreground"
                       : "bg-background hover:bg-muted"
-                  }`}
+                    }`}
                 >
                   {opt.label}
                 </button>
@@ -327,12 +353,15 @@ export default function LancamentosPage() {
                       <tr key={tx.id} className="border-b last:border-0 hover:bg-muted/50">
                         <td className="py-3 px-2 whitespace-nowrap">{formatDate(tx.date)}</td>
                         <td className="py-3 px-2">
-                          {tx.description}
-                          {tx.totalInstallments && (
-                            <span className="text-xs text-muted-foreground ml-1">
-                              ({tx.currentInstallment}/{tx.totalInstallments})
-                            </span>
-                          )}
+                          <span className="flex items-center gap-1.5">
+                            {tx.isSecret && <span title="Secreto" className="flex"><Lock className="h-3.5 w-3.5 text-amber-500 shrink-0" /></span>}
+                            {tx.description}
+                            {tx.totalInstallments && (
+                              <span className="text-xs text-muted-foreground ml-1">
+                                ({tx.currentInstallment}/{tx.totalInstallments})
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="py-3 px-2">{tx.category}</td>
                         <td className="py-3 px-2 text-center">
@@ -428,18 +457,16 @@ export default function LancamentosPage() {
                 <button
                   type="button"
                   onClick={() => setForm({ ...form, type: "expense" })}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                    form.type === "expense" ? "bg-red-500 text-white" : "bg-background hover:bg-muted"
-                  }`}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${form.type === "expense" ? "bg-red-500 text-white" : "bg-background hover:bg-muted"
+                    }`}
                 >
                   Despesa
                 </button>
                 <button
                   type="button"
                   onClick={() => setForm({ ...form, type: "income" })}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                    form.type === "income" ? "bg-green-500 text-white" : "bg-background hover:bg-muted"
-                  }`}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${form.type === "income" ? "bg-green-500 text-white" : "bg-background hover:bg-muted"
+                    }`}
                 >
                   Receita
                 </button>
@@ -457,6 +484,24 @@ export default function LancamentosPage() {
                 <option value="partner">Dele</option>
                 <option value="joint">Conjunto</option>
               </select>
+            </div>
+
+            <div className="flex items-center gap-3 py-1">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.isSecret}
+                  onChange={(e) => setForm({ ...form, isSecret: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500"></div>
+              </label>
+              <div>
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" /> Secreto
+                </span>
+                <p className="text-xs text-muted-foreground">Oculta este lancamento do(a) parceiro(a)</p>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

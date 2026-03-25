@@ -59,6 +59,81 @@ interface ProjectionPoint {
   meta: number;
 }
 
+function toFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeMonthData(monthPayload: any, txPayload: any, competencia: string): MonthData {
+  const txList = Array.isArray(txPayload?.transactions)
+    ? txPayload.transactions
+    : Array.isArray(txPayload)
+    ? txPayload
+    : [];
+
+  const categoryMap = new Map<string, CategorySummary>();
+  let txIncome = 0;
+  let txExpense = 0;
+
+  for (const tx of txList) {
+    const rawType = tx?.type === "income" ? "income" : tx?.type === "expense" ? "expense" : null;
+    if (!rawType) continue;
+
+    const amount = toFiniteNumber(tx?.amount);
+    const category = String(tx?.category ?? "Outros");
+    const key = `${rawType}::${category}`;
+
+    const current = categoryMap.get(key) ?? { category, total: 0, type: rawType };
+    current.total += amount;
+    categoryMap.set(key, current);
+
+    if (rawType === "income") txIncome += amount;
+    if (rawType === "expense") txExpense += amount;
+  }
+
+  const receitas = toFiniteNumber(monthPayload?.receitas ?? monthPayload?.totalIncome ?? txIncome);
+  const despesas = toFiniteNumber(monthPayload?.despesas ?? monthPayload?.totalExpense ?? txExpense);
+  const saldo = toFiniteNumber(
+    monthPayload?.saldo ?? monthPayload?.closingBalance ?? receitas - despesas
+  );
+
+  return {
+    competencia: String(monthPayload?.competencia ?? competencia),
+    isClosed: Boolean(monthPayload?.isClosed ?? (monthPayload?.status === "closed")),
+    receitas,
+    despesas,
+    saldo,
+    categorySummary: Array.from(categoryMap.values()).sort((a, b) => b.total - a.total),
+    goalSuggestion: toFiniteNumber(monthPayload?.goalSuggestion ?? monthPayload?.metaAllocation ?? 1200.00),
+    currentGoalAmount: toFiniteNumber(monthPayload?.currentGoalAmount ?? 0),
+    goalTarget: toFiniteNumber(monthPayload?.goalTarget ?? 30000),
+  };
+}
+
+function normalizeProjectionPoints(payload: any, monthlyMeta: number): ProjectionPoint[] {
+  if (!Array.isArray(payload)) return [];
+
+  let cumulativeMeta = 0;
+
+  return payload.map((point: any, index: number) => {
+    const competencia = String(point?.competencia ?? "");
+    const label =
+      typeof point?.label === "string" && point.label
+        ? point.label
+        : /^\d{4}-\d{2}$/.test(competencia)
+        ? competenciaToLabel(competencia)
+        : `M${index + 1}`;
+
+    cumulativeMeta += monthlyMeta;
+
+    return {
+      label,
+      saldo: toFiniteNumber(point?.saldo ?? point?.projectedBalance ?? point?.balance),
+      meta: toFiniteNumber(point?.meta ?? point?.projectedMeta ?? cumulativeMeta),
+    };
+  });
+}
+
 export default function FecharMesPage() {
   const [competencia, setCompetencia] = useState(getCurrentCompetencia());
   const [monthData, setMonthData] = useState<MonthData | null>(null);
@@ -79,19 +154,26 @@ export default function FecharMesPage() {
     setClosed(false);
     setStep(1);
     try {
-      const [monthRes, projRes] = await Promise.all([
+      const [monthRes, projRes, txRes] = await Promise.all([
         fetch(`/api/months?competencia=${competencia}`),
         fetch(`/api/projection?competencia=${competencia}`),
+        fetch(`/api/transactions?competencia=${competencia}`),
       ]);
 
       if (!monthRes.ok) throw new Error("Erro ao carregar dados do mes");
       const mJson = await monthRes.json();
-      setMonthData(mJson);
-      setAllocation(String(mJson.goalSuggestion ?? 1200.00));
+      const txJson = txRes.ok ? await txRes.json() : [];
+      const normalizedMonth = normalizeMonthData(mJson, txJson, competencia);
+      setMonthData(normalizedMonth);
+      setAllocation(String(normalizedMonth.goalSuggestion || 1200.00));
 
       if (projRes.ok) {
         const pJson = await projRes.json();
-        setProjection(pJson.projection ?? pJson);
+        setProjection(
+          normalizeProjectionPoints(pJson.projection ?? pJson, normalizedMonth.goalSuggestion || 0)
+        );
+      } else {
+        setProjection([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -113,7 +195,7 @@ export default function FecharMesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           competencia,
-          allocation: parseFloat(allocation) || 0,
+          metaAllocation: parseFloat(allocation) || 0,
         }),
       });
       if (!res.ok) throw new Error("Erro ao fechar mes");
@@ -128,10 +210,8 @@ export default function FecharMesPage() {
   const handleReopen = async () => {
     setReopening(true);
     try {
-      const res = await fetch("/api/months", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ competencia, action: "reopen" }),
+      const res = await fetch(`/api/months/${encodeURIComponent(competencia)}/reopen`, {
+        method: "POST",
       });
       if (!res.ok) throw new Error("Erro ao reabrir mes");
       fetchData();

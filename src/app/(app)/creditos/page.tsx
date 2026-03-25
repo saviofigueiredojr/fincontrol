@@ -31,6 +31,47 @@ interface Credit {
   status: "received" | "pending" | "future";
 }
 
+function toFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeStatus(value: unknown): Credit["status"] {
+  if (value === "received" || value === "pending" || value === "future") return value;
+  return "pending";
+}
+
+function normalizeCredits(payload: any): Credit[] {
+  if (!Array.isArray(payload)) return [];
+
+  // API can return grouped items: { clientName, transactions: [...] }
+  if (payload.some((item) => Array.isArray(item?.transactions))) {
+    return payload.flatMap((group: any) => {
+      const clientName = String(group?.clientName ?? "Cliente");
+      const txs = Array.isArray(group?.transactions) ? group.transactions : [];
+
+      return txs.map((tx: any) => ({
+        id: String(tx?.id ?? `${clientName}-${tx?.date ?? Math.random()}`),
+        clientName,
+        description: String(tx?.detail ?? tx?.description ?? clientName),
+        amount: toFiniteNumber(tx?.amount),
+        dueDate: String(tx?.dueDate ?? tx?.date ?? new Date().toISOString()),
+        status: normalizeStatus(tx?.status),
+      }));
+    });
+  }
+
+  // Flat fallback shape
+  return payload.map((item: any) => ({
+    id: String(item?.id ?? ""),
+    clientName: String(item?.clientName ?? item?.description ?? "Cliente"),
+    description: String(item?.description ?? item?.detail ?? "Crédito"),
+    amount: toFiniteNumber(item?.amount),
+    dueDate: String(item?.dueDate ?? item?.date ?? new Date().toISOString()),
+    status: normalizeStatus(item?.status),
+  }));
+}
+
 const STATUS_CONFIG: Record<string, { label: string; variant: "success" | "warning" | "default"; icon: typeof CheckCircle }> = {
   received: { label: "Recebido", variant: "success", icon: CheckCircle },
   pending: { label: "Pendente", variant: "warning", icon: Clock },
@@ -62,7 +103,7 @@ export default function CreditosPage() {
       const res = await fetch("/api/creditos");
       if (!res.ok) throw new Error("Erro ao carregar creditos");
       const json = await res.json();
-      setCredits(json.credits ?? json);
+      setCredits(normalizeCredits(json.credits ?? json));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
