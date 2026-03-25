@@ -27,7 +27,7 @@ Projeto pessoal em evolucao.
 - Divisao de despesas em modo `50/50`, proporcional ou personalizado
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes
-- Controle de creditos PJ
+- Gestão de faturamentos PJ em formato Kanban (Falta Emitir, Emitida, Pendente, Pago) com isolamento automático de receitas no Dashboard
 - Isolamento por `household`
 
 ## Stack
@@ -50,7 +50,7 @@ O projeto e um monolito web com frontend e backend no mesmo repositorio:
 - `src/modules`: contratos e servicos por dominio
 - `prisma`: schema, migrations e seed
 
-O isolamento de dados e feito por `Household`. Usuarios pertencem a uma casa, e as entidades compartilhadas do planejamento usam `householdId`. As transacoes continuam ligadas ao dono via `userId`, com regras de visibilidade baseadas em `ownership` e `isSecret`.
+O isolamento de dados e feito por `Household`. Usuarios pertencem a uma casa, e as entidades compartilhadas do planejamento usam `householdId`. As transacoes continuam ligadas ao dono via `userId`, com regras de visibilidade baseadas em `ownership` e `isSecret`. Os recebimentos PJ possuem pipeline próprio (`PjReceipt`) e só impactam o fluxo de caixa real quando consolidados como pagos.
 
 As rotas mais centrais estao caminhando para um padrao mais profissional:
 
