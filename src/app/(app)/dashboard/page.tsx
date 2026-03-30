@@ -46,6 +46,7 @@ interface DashboardData {
   meta: { current: number; target: number; percentage: number; lifespan?: number };
   chartData: { competencia: string; label: string; receitas: number; despesas: number; saldo: number }[];
   despesasPorCategoria: { name: string; value: number }[];
+  receitasPorCategoria: { name: string; value: number }[];
   parcelasAtivas: {
     id: string;
     description: string;
@@ -119,6 +120,17 @@ function normalizeDashboardData(payload: any): DashboardData {
     value: toFiniteNumber(item?.value ?? item?.amount ?? item?.total ?? item?.spent),
   }));
 
+  const receitasPorCategoriaSource = Array.isArray(payload?.receitasPorCategoria)
+    ? payload.receitasPorCategoria
+    : Array.isArray(payload?.topIncomeCategories)
+      ? payload.topIncomeCategories
+      : [];
+
+  const receitasPorCategoria = receitasPorCategoriaSource.map((item: any) => ({
+    name: String(item?.name ?? item?.category ?? "Categoria"),
+    value: toFiniteNumber(item?.value ?? item?.amount ?? item?.total ?? item?.spent),
+  }));
+
   const parcelasAtivasSource = Array.isArray(payload?.parcelasAtivas)
     ? payload.parcelasAtivas
     : Array.isArray(payload?.activeInstallments)
@@ -165,6 +177,7 @@ function normalizeDashboardData(payload: any): DashboardData {
     },
     chartData,
     despesasPorCategoria,
+    receitasPorCategoria,
     parcelasAtivas,
     orcamentoPorCategoria,
   };
@@ -351,7 +364,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Receitas vs Despesas</CardTitle>
@@ -407,6 +420,42 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Receitas por Categoria</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px]">
+              {data.receitasPorCategoria.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Nenhuma receita categorizada neste mês
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={data.receitasPorCategoria}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={58}
+                      outerRadius={92}
+                      paddingAngle={2}
+                      dataKey="value"
+                      nameKey="name"
+                      label={false}
+                    >
+                      {data.receitasPorCategoria.map((_, index) => (
+                        <Cell key={`income-cell-${index}`} fill={PIE_COLORS[(index + 1) % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={customTooltip} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -449,40 +498,6 @@ export default function DashboardPage() {
                 )}
               </tbody>
             </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Orcamento por Categoria</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {data.orcamentoPorCategoria.length === 0 ? (
-              <p className="py-8 text-center text-muted-foreground">Nenhum orcamento definido</p>
-            ) : (
-              data.orcamentoPorCategoria.map((item) => (
-                <div key={item.category} className="rounded-2xl border border-border/60 bg-background/50 p-4">
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className="font-medium">{item.category}</span>
-                    <span className="text-muted-foreground">
-                      {formatCurrency(item.actual)} / {formatCurrency(item.budget)}
-                    </span>
-                  </div>
-                  <Progress
-                    value={Math.min(item.percentage, 100)}
-                    indicatorClassName={
-                      item.percentage > 100
-                        ? "bg-gradient-to-r from-rose-600 to-rose-500"
-                        : item.percentage > 80
-                          ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                          : "bg-gradient-to-r from-emerald-500 to-emerald-400"
-                    }
-                  />
-                </div>
-              ))
-            )}
           </div>
         </CardContent>
       </Card>

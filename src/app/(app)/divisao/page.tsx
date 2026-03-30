@@ -47,6 +47,25 @@ interface Settings {
   partnerIncome: number;
 }
 
+function isMonthlyIncome(tx: Transaction) {
+  if (tx.type !== "income") {
+    return false;
+  }
+
+  const normalizedCategory = tx.category.trim().toLowerCase();
+  const normalizedDescription = tx.description.trim().toLowerCase();
+
+  if (normalizedCategory === "saldo anterior") {
+    return false;
+  }
+
+  if (normalizedDescription.includes("saldo inicial")) {
+    return false;
+  }
+
+  return true;
+}
+
 export default function DivisaoPage() {
   const [competencia, setCompetencia] = useState(getCurrentCompetencia());
   const [mode, setMode] = useState<"equal" | "proportional" | "custom">("proportional");
@@ -79,24 +98,31 @@ export default function DivisaoPage() {
 
       if (settingsRes.ok) {
         const sJson = await settingsRes.json();
-        const myIncomeFallback = txList
-          .filter((tx: Transaction) => tx.type === "income" && tx.ownership === "mine")
+        const myMonthlyIncome = txList
+          .filter((tx: Transaction) => isMonthlyIncome(tx) && tx.ownership === "mine")
           .reduce((sum: number, tx: Transaction) => sum + Number(tx.amount || 0), 0);
-        const partnerIncomeFallback = txList
-          .filter((tx: Transaction) => tx.type === "income" && tx.ownership === "partner")
+        const partnerMonthlyIncome = txList
+          .filter((tx: Transaction) => isMonthlyIncome(tx) && tx.ownership === "partner")
           .reduce((sum: number, tx: Transaction) => sum + Number(tx.amount || 0), 0);
+        const hasMonthlyIncomeData = myMonthlyIncome > 0 || partnerMonthlyIncome > 0;
 
-        const myIncome = parseFloat(
-          sJson.primary_income ||
-            sJson.savio_income ||
-            (myIncomeFallback > 0 ? String(myIncomeFallback) : String(DEFAULT_PRIMARY_INCOME))
-        );
-        const partnerBase = parseFloat(
-          sJson.partner_income ||
-            (partnerIncomeFallback > 0 ? String(partnerIncomeFallback) : String(DEFAULT_PARTNER_INCOME))
-        );
-        const partnerVa = parseFloat(sJson.partner_va || String(DEFAULT_PARTNER_BENEFIT));
-        setSettings({ myIncome, partnerIncome: partnerBase + partnerVa });
+        if (hasMonthlyIncomeData) {
+          setSettings({
+            myIncome: myMonthlyIncome,
+            partnerIncome: partnerMonthlyIncome,
+          });
+        } else {
+          const myIncome = parseFloat(
+            sJson.primary_income ||
+              sJson.savio_income ||
+              String(DEFAULT_PRIMARY_INCOME)
+          );
+          const partnerBase = parseFloat(
+            sJson.partner_income || String(DEFAULT_PARTNER_INCOME)
+          );
+          const partnerVa = parseFloat(sJson.partner_va || String(DEFAULT_PARTNER_BENEFIT));
+          setSettings({ myIncome, partnerIncome: partnerBase + partnerVa });
+        }
       }
 
       if (contextRes.ok) {
@@ -130,21 +156,16 @@ export default function DivisaoPage() {
   const partnerPercentage = totalIncome > 0 ? (settings.partnerIncome / totalIncome) * 100 : 50;
   const selfDisplayName = getSelfDisplayName(householdContext);
   const partnerDisplayName = getPartnerDisplayName(householdContext);
-  const selfUserId = householdContext.self.id;
-  const partnerUserId = householdContext.partner?.id ?? "";
-
   const jointExpenses = transactions.filter((tx) => tx.type === "expense" && tx.ownership === "joint");
   const myIndividualExpenses = transactions.filter(
     (tx) =>
       tx.type === "expense" &&
-      tx.ownership !== "joint" &&
-      (selfUserId ? tx.userId === selfUserId : tx.ownership === "mine")
+      tx.ownership === "mine"
   );
   const partnerIndividualExpenses = transactions.filter(
     (tx) =>
       tx.type === "expense" &&
-      tx.ownership !== "joint" &&
-      (partnerUserId ? tx.userId === partnerUserId : tx.ownership === "partner")
+      tx.ownership === "partner"
   );
 
   const totalJoint = jointExpenses.reduce((sum, tx) => sum + tx.amount, 0);

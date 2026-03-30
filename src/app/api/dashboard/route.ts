@@ -90,16 +90,17 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 3. Top 5 categories by expense
+    // 3. Top 5 categories by expense and income
     const expenseByCategory = new Map<string, { label: string; amount: number }>();
+    const incomeByCategory = new Map<string, { label: string; amount: number }>();
     transactions
-      .filter((t) => t.type === "expense")
       .forEach((t) => {
         const key = normalizeCategoryKey(t.category);
-        const current = expenseByCategory.get(key) ?? { label: t.category, amount: 0 };
+        const targetMap = t.type === "income" ? incomeByCategory : expenseByCategory;
+        const current = targetMap.get(key) ?? { label: t.category, amount: 0 };
         current.amount += t.amount;
         if (!current.label) current.label = t.category;
-        expenseByCategory.set(key, current);
+        targetMap.set(key, current);
       });
 
     const topCategories = Array.from(expenseByCategory.values())
@@ -107,27 +108,32 @@ export async function GET(request: NextRequest) {
       .slice(0, 5)
       .map(({ label, amount }) => ({ category: label, amount }));
 
-    // 4. Active installments (household scoped)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const topIncomeCategories = Array.from(incomeByCategory.values())
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+      .map(({ label, amount }) => ({ category: label, amount }));
 
+    // 4. Active installments scoped to the selected competencia
     const activeInstallmentTransactions = await prisma.transaction.findMany({
       where: {
+        type: "expense",
         installmentTotal: { not: null },
-        date: { gte: today },
+        installmentCurrent: { not: null },
+        competencia: { gte: competencia },
         userId: { in: memberIds },
         OR: [
           { isSecret: false },
           { isSecret: true, userId },
         ],
       },
-      orderBy: [{ date: "asc" }, { installmentCurrent: "asc" }],
+      orderBy: [{ competencia: "asc" }, { installmentCurrent: "asc" }],
       select: {
         id: true,
         parentId: true,
         description: true,
         amount: true,
         date: true,
+        competencia: true,
         installmentCurrent: true,
         installmentTotal: true,
       },
@@ -143,7 +149,16 @@ export async function GET(request: NextRequest) {
 
     const activeInstallments = Array.from(installmentGroups.entries())
       .map(([id, items]) => {
-        const nextInstallment = [...items].sort((a, b) => a.date.getTime() - b.date.getTime())[0];
+        const nextInstallment = [...items]
+          .sort((a, b) => {
+            if (a.competencia === b.competencia) {
+              return (a.installmentCurrent ?? 0) - (b.installmentCurrent ?? 0);
+            }
+
+            return a.competencia.localeCompare(b.competencia);
+          })
+          .find((item) => item.competencia >= competencia);
+
         if (!nextInstallment || !nextInstallment.installmentTotal || !nextInstallment.installmentCurrent) {
           return null;
         }
@@ -254,6 +269,7 @@ export async function GET(request: NextRequest) {
       balance,
       chartData,
       topCategories,
+      topIncomeCategories,
       activeInstallments,
       budgetProgress,
       meta: { ...meta, lifespan }
