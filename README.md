@@ -1,26 +1,28 @@
 # FinControl
 
-Aplicacao de controle financeiro familiar feita com Next.js, Prisma e NextAuth.
+[![CI](https://github.com/saviofigueiredojr/fincontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/saviofigueiredojr/fincontrol/actions/workflows/ci.yml)
 
-O projeto organiza receitas, despesas, cartoes, metas e fechamento mensal em uma interface unica. O foco atual e um household pequeno, com visibilidade compartilhada por padrao e suporte a lancamentos secretos quando necessario.
+Workspace de planejamento financeiro familiar construido com Next.js, Prisma e NextAuth.
 
-## Status
+O projeto centraliza receitas, despesas, cartoes, metas, fechamento mensal e recebimentos PJ em uma unica interface. A proposta e combinar uma experiencia premium de uso com uma arquitetura pragmatica para um household pequeno, mantendo visibilidade compartilhada por padrao e privacidade seletiva quando necessario.
 
-Projeto pessoal em evolucao.
+## Visao geral
 
-- Fluxo principal funcional para uso local
-- Preparado para PostgreSQL
-- Compativel com deploy em Vercel usando PostgreSQL hospedado
-- CI basica incluida para garantir build em pushes e PRs
-- Hardening, testes automatizados e acabamento de producao ainda em andamento
-- Repositorio pode ser publico, mesmo com o app publicado de forma privada
+Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendizado.
+
+- fluxo principal funcional para uso local
+- preparado para PostgreSQL
+- compativel com deploy privado na Vercel usando PostgreSQL hospedado
+- CI de build e tipagem para pushes e PRs
+- testes automatizados iniciais com Vitest em modulos de dominio
+- repositorio publico, com app pensado para deploy privado
 
 `package.json` continua com `"private": true` de proposito, para evitar publish acidental no npm.
 
 ## O que o app faz
 
 - Dashboard mensal com receitas, despesas, saldo, categorias e projecao
-- CRUD de lancamentos com `mine`, `partner` e `joint`
+- CRUD de lancamentos com titular individual ou conjunto
 - Marcacao de transacoes secretas
 - Importacao de faturas por CSV do Inter e OFX
 - Controle de parcelas ativas
@@ -28,7 +30,7 @@ Projeto pessoal em evolucao.
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes
 - Gestão de faturamentos PJ em formato Kanban (Falta Emitir, Emitida, Pendente, Pago) com isolamento automático de receitas no Dashboard
-- Isolamento por `household`
+- Isolamento por `household`, com nomes exibidos dinamicamente conforme o usuario logado
 
 ## Stack
 
@@ -52,13 +54,13 @@ O projeto e um monolito web com frontend e backend no mesmo repositorio:
 
 O isolamento de dados e feito por `Household`. Usuarios pertencem a uma casa, e as entidades compartilhadas do planejamento usam `householdId`. As transacoes continuam ligadas ao dono via `userId`, com regras de visibilidade baseadas em `ownership` e `isSecret`. Os recebimentos PJ possuem pipeline próprio (`PjReceipt`) e só impactam o fluxo de caixa real quando consolidados como pagos.
 
-As rotas mais centrais estao caminhando para um padrao mais profissional:
+As rotas mais centrais seguem um padrao orientado a dominio:
 
 - validacao de payload com `zod`
 - route handlers mais finos
 - servicos de dominio em `src/modules`
 - validacao centralizada de ambiente
-- fechamento mensal e importacao tratados como fluxos de dominio, nao apenas handlers HTTP
+- fechamento mensal, recorrencia, PJ e importacao tratados como fluxos de dominio, nao apenas handlers HTTP
 
 Para uma visao mais tecnica da organizacao do backend, veja [docs/architecture.md](./docs/architecture.md).
 
@@ -74,7 +76,7 @@ O repositorio ja inclui uma base importante de seguranca:
 - comparacao dummy hash para reduzir enumeracao por timing
 - scoping por `household` nas rotas mais importantes
 
-Ainda assim, trate o projeto como software em evolucao. Antes de expor em producao para internet aberta, vale manter uma revisao de seguranca e regressao a cada mudanca importante.
+Ainda assim, trate o projeto como software em evolucao. Antes de expor em producao para internet aberta, vale manter revisao de seguranca, observabilidade e regressao a cada mudanca importante.
 
 Tambem existe uma politica inicial em [SECURITY.md](./SECURITY.md).
 Se voce quiser receber contribuicoes externas, veja tambem [CONTRIBUTING.md](./CONTRIBUTING.md).
@@ -157,13 +159,13 @@ Abra [http://localhost:3000](http://localhost:3000).
 
 ## Credenciais do seed
 
-O seed atual cria tres usuarios de desenvolvimento:
+O seed atual cria tres usuarios de desenvolvimento com dados demo:
 
 - `usuario1@fincontrol.local` / `Seed@2026!`
 - `usuario2@fincontrol.local` / `Seed@2026!`
 - `isolado@fincontrol.local` / `Seed@2026!`
 
-O terceiro usuario fica em outro `household` e serve para validar isolamento de dados localmente.
+O terceiro usuario fica em outro `household` e serve para validar isolamento de dados localmente. O seed publico foi sanitizado para nao refletir dados pessoais ou financeiros reais.
 
 ## Scripts uteis
 
@@ -178,6 +180,17 @@ O terceiro usuario fica em outro `household` e serve para validar isolamento de 
 - `npm run db:seed`: popula o banco com dados de exemplo
 - `npm run db:studio`: abre o Prisma Studio
 - `npm run ci`: roda o conjunto minimo usado na CI
+
+## Testes
+
+O repositorio ja inclui uma base inicial de testes com Vitest para regras de dominio como:
+
+- settle-up do fechamento mensal
+- benchmark de reserva de emergencia
+- automacoes PJ
+- fallback/categorizacao de importacao
+
+Ainda nao ha uma cobertura ampla de interface e integracao fim a fim.
 
 ## Rotas principais
 
@@ -243,7 +256,8 @@ Guia detalhado: [docs/deploy-vercel.md](./docs/deploy-vercel.md).
 
 ## Limites atuais
 
-- sem testes automatizados no repositorio
+- cobertura de testes ainda parcial
 - autenticacao apenas por credenciais
 - sem integracao com Open Banking
 - produto ainda muito orientado ao caso de uso pessoal/familiar
+- deploy publico nao e o objetivo; a recomendacao e manter a aplicacao privada
