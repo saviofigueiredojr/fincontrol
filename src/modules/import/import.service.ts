@@ -6,6 +6,10 @@ import { FallbackCategorizerService } from "./fallback-categorizer.service";
 
 type DatabaseClient = typeof prisma | Prisma.TransactionClient;
 
+function normalizeStatementContent(content: string) {
+  return content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function parseBRLCurrency(value: string): number {
   const cleaned = value.replace(/R\$\s*/g, "").trim();
   const isNegative = cleaned.startsWith("-");
@@ -165,10 +169,26 @@ async function resetImportedCompetencia(
 
   const parentTransactions = await db.transaction.findMany({
     where: { cardStatementId: statement.id },
-    select: { id: true },
+    select: { id: true, parentId: true },
   });
 
   const parentIds = parentTransactions.map((transaction) => transaction.id);
+  const rootParentIds = Array.from(
+    new Set(
+      parentTransactions
+        .map((transaction) => transaction.parentId)
+        .filter((parentId): parentId is string => Boolean(parentId))
+    )
+  );
+
+  if (rootParentIds.length > 0) {
+    await db.transaction.deleteMany({
+      where: {
+        parentId: { in: rootParentIds },
+        competencia: { gte: competencia },
+      },
+    });
+  }
 
   if (parentIds.length > 0) {
     await db.transaction.deleteMany({
@@ -190,20 +210,62 @@ async function resetImportedCompetencia(
   return [statement.id];
 }
 
+async function removeManualStatementPlaceholders(
+  db: DatabaseClient,
+  userId: string,
+  cardName: string,
+  competencias: string[]
+) {
+  if (competencias.length === 0) {
+    return;
+  }
+
+  await db.transaction.deleteMany({
+    where: {
+      userId,
+      source: "manual",
+      cardStatementId: null,
+      competencia: { in: Array.from(new Set(competencias)) },
+      category: {
+        in: ["Cartão de Crédito", "Cartao de Credito"],
+      },
+      description: {
+        startsWith: `Fatura ${cardName}`,
+        mode: "insensitive",
+      },
+    },
+  });
+}
+
 async function importInterCsv(
   db: DatabaseClient,
   content: string,
   cardId: string,
   userId: string,
+  cardName: string,
   selectedCompetencia?: string
 ) {
-  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  const lines = normalizeStatementContent(content)
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
 
   if (lines.length < 2) {
     return { count: 0, statementIds: [] as string[] };
   }
 
   const dataLines = lines.slice(1);
+  const statementCache = new Map<string, Awaited<ReturnType<typeof getOrCreateStatement>>>();
+
+  async function getStatement(competencia: string) {
+    const cached = statementCache.get(competencia);
+    if (cached) {
+      return cached;
+    }
+
+    const statement = await getOrCreateStatement(db, cardId, competencia);
+    statementCache.set(competencia, statement);
+    return statement;
+  }
 
   const parsedRows = [];
   for (const line of dataLines) {
@@ -212,7 +274,8 @@ async function importInterCsv(
 
     const [dateValue, description, category, tipo, amountValue] = columns;
     const amount = parseBRLCurrency(amountValue);
-    if (amount < 0) continue;
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    if (!description.trim()) continue;
 
     const date = parseBRDate(dateValue);
     if (Number.isNaN(date.getTime())) continue;
@@ -232,6 +295,32 @@ async function importInterCsv(
     });
   }
 
+  if (parsedRows.length === 0) {
+    throw new Error("Nenhuma transação válida encontrada no CSV enviado.");
+  }
+
+  const touchedCompetencias = new Set(parsedRows.map((row) => row.competencia));
+  for (const row of parsedRows) {
+    if (!row.installment) continue;
+
+    for (
+      let installmentIndex = row.installment.current + 1;
+      installmentIndex <= row.installment.total;
+      installmentIndex += 1
+    ) {
+      touchedCompetencias.add(
+        shiftCompetencia(row.competencia, installmentIndex - row.installment.current)
+      );
+    }
+  }
+
+  await removeManualStatementPlaceholders(
+    db,
+    userId,
+    cardName,
+    Array.from(touchedCompetencias)
+  );
+
   const statementIds: string[] = [];
   let count = 0;
 
@@ -239,7 +328,7 @@ async function importInterCsv(
     const finalCategory =
       FallbackCategorizerService.categorize(row.description, row.rawCategory) || "Outros";
 
-    const statement = await getOrCreateStatement(db, cardId, row.competencia);
+    const statement = await getStatement(row.competencia);
     statementIds.push(statement.id);
 
     const mainTransaction = await db.transaction.create({
@@ -261,22 +350,21 @@ async function importInterCsv(
 
     count += 1;
 
-    if (row.installment && row.installment.current === 1 && row.installment.total > 1) {
+    if (row.installment && row.installment.current < row.installment.total) {
       for (
-        let installmentIndex = 2;
+        let installmentIndex = row.installment.current + 1;
         installmentIndex <= row.installment.total;
         installmentIndex += 1
       ) {
-        const futureCompetencia = shiftCompetencia(row.competencia, installmentIndex - 1);
+        const futureCompetencia = shiftCompetencia(
+          row.competencia,
+          installmentIndex - row.installment.current
+        );
         const futureDate = getDateForCompetencia(
           futureCompetencia,
           row.referenceDay
         );
-        const futureStatement = await getOrCreateStatement(
-          db,
-          cardId,
-          futureCompetencia
-        );
+        const futureStatement = await getStatement(futureCompetencia);
 
         statementIds.push(futureStatement.id);
 
@@ -311,13 +399,27 @@ async function importOfx(
   content: string,
   cardId: string,
   userId: string,
+  cardName: string,
   selectedCompetencia?: string
 ) {
+  const statementCache = new Map<string, Awaited<ReturnType<typeof getOrCreateStatement>>>();
+  const normalizedContent = normalizeStatementContent(content);
   const transactionRegex = /<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi;
   let match: RegExpExecArray | null;
   const parsedRows = [];
 
-  while ((match = transactionRegex.exec(content)) !== null) {
+  async function getStatement(competencia: string) {
+    const cached = statementCache.get(competencia);
+    if (cached) {
+      return cached;
+    }
+
+    const statement = await getOrCreateStatement(db, cardId, competencia);
+    statementCache.set(competencia, statement);
+    return statement;
+  }
+
+  while ((match = transactionRegex.exec(normalizedContent)) !== null) {
     const block = match[1];
     const postedAt = extractOFXField(block, "DTPOSTED");
     const rawAmount = extractOFXField(block, "TRNAMT");
@@ -348,6 +450,17 @@ async function importOfx(
     });
   }
 
+  if (parsedRows.length === 0) {
+    throw new Error("Nenhuma transação válida encontrada no OFX enviado.");
+  }
+
+  await removeManualStatementPlaceholders(
+    db,
+    userId,
+    cardName,
+    parsedRows.map((row) => row.competencia)
+  );
+
   const statementIds: string[] = [];
   let count = 0;
 
@@ -355,7 +468,7 @@ async function importOfx(
     const finalCategory =
       FallbackCategorizerService.categorize(row.description) || "Outros";
 
-    const statement = await getOrCreateStatement(db, cardId, row.competencia);
+    const statement = await getStatement(row.competencia);
     statementIds.push(statement.id);
 
     await db.transaction.create({
@@ -394,7 +507,7 @@ export async function importTransactionsFromStatement(
       id: input.cardId,
       userId,
     },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
   if (!card) {
@@ -417,14 +530,14 @@ export async function importTransactionsFromStatement(
 
     const imported =
       importFormat === ".csv"
-        ? await importInterCsv(db, content, input.cardId, userId, input.competencia)
-        : await importOfx(db, content, input.cardId, userId, input.competencia);
+        ? await importInterCsv(db, content, input.cardId, userId, card.name, input.competencia)
+        : await importOfx(db, content, input.cardId, userId, card.name, input.competencia);
 
     statementIdsToRefresh.push(...imported.statementIds);
     await refreshStatementTotals(db, statementIdsToRefresh);
 
     return imported.count;
-  }, { timeout: 25000 });
+  }, { timeout: 60000 });
 
   return { kind: "ok" as const, count: result };
 }

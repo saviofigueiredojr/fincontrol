@@ -52,8 +52,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Import error:", error);
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Erro ao importar arquivo";
     return NextResponse.json(
-      { error: "Erro ao importar arquivo" },
+      { error: message },
       { status: 500 }
     );
   }
