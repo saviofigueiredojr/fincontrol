@@ -10,13 +10,15 @@ import {
   AlertCircle,
   CheckCircle,
   FileUp,
+  Pencil,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -37,6 +39,10 @@ interface CreditCardInfo {
   bank: string;
   closingDay: number;
   dueDay: number;
+  linkedTransactionsCount?: number;
+  activeInstallmentsCount?: number;
+  statementsCount?: number;
+  canDelete?: boolean;
 }
 
 interface CardTransaction {
@@ -76,6 +82,18 @@ export default function CartoesPage() {
   const [importCompetencia, setImportCompetencia] = useState(getCurrentCompetencia());
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<number | null>(null);
+  const [cardModalOpen, setCardModalOpen] = useState(false);
+  const [cardDeleteOpen, setCardDeleteOpen] = useState(false);
+  const [cardSaving, setCardSaving] = useState(false);
+  const [cardDeleting, setCardDeleting] = useState(false);
+  const [editingCard, setEditingCard] = useState<CreditCardInfo | null>(null);
+  const [cardToDelete, setCardToDelete] = useState<CreditCardInfo | null>(null);
+  const [cardForm, setCardForm] = useState({
+    name: "",
+    bank: "",
+    closingDay: "",
+    dueDay: "",
+  });
 
   const fetchCards = useCallback(async () => {
     setLoading(true);
@@ -84,10 +102,16 @@ export default function CartoesPage() {
       const res = await fetch("/api/cards");
       if (!res.ok) throw new Error("Erro ao carregar cartoes");
       const json = await res.json();
-      setCards(json.cards ?? json);
-      if (json.cards?.length > 0 || json.length > 0) {
-        const cardList = json.cards ?? json;
-        setSelectedCard(cardList[0].id);
+      const cardList = json.cards ?? json;
+      setCards(cardList);
+      if (cardList?.length > 0) {
+        setSelectedCard((current) =>
+          current && cardList.some((card: CreditCardInfo) => card.id === current)
+            ? current
+            : cardList[0].id
+        );
+      } else {
+        setSelectedCard("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -159,6 +183,95 @@ export default function CartoesPage() {
     }
   };
 
+  const openCreateCard = () => {
+    setEditingCard(null);
+    setCardForm({
+      name: "",
+      bank: "",
+      closingDay: "",
+      dueDay: "",
+    });
+    setCardModalOpen(true);
+  };
+
+  const openEditCard = (card: CreditCardInfo) => {
+    setEditingCard(card);
+    setCardForm({
+      name: card.name,
+      bank: card.bank,
+      closingDay: String(card.closingDay),
+      dueDay: String(card.dueDay),
+    });
+    setCardModalOpen(true);
+  };
+
+  const openDeleteCard = (card: CreditCardInfo) => {
+    setCardToDelete(card);
+    setCardDeleteOpen(true);
+  };
+
+  const handleSaveCard = async () => {
+    setCardSaving(true);
+    try {
+      const payload = {
+        name: cardForm.name,
+        bank: cardForm.bank,
+        closingDay: Number(cardForm.closingDay),
+        dueDay: Number(cardForm.dueDay),
+      };
+
+      const res = await fetch(
+        editingCard ? `/api/cards/${editingCard.id}` : "/api/cards",
+        {
+          method: editingCard ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "Erro ao salvar cartão");
+      }
+
+      setCardModalOpen(false);
+      await fetchCards();
+      if (json?.id) {
+        setSelectedCard(json.id);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao salvar cartão");
+    } finally {
+      setCardSaving(false);
+    }
+  };
+
+  const handleDeleteCard = async () => {
+    if (!cardToDelete) return;
+
+    setCardDeleting(true);
+    try {
+      const res = await fetch(`/api/cards/${cardToDelete.id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Erro ao excluir cartão");
+      }
+
+      setCardDeleteOpen(false);
+      setCardToDelete(null);
+      await fetchCards();
+      fetchCardTransactions();
+      fetchInstallments();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao excluir cartão");
+    } finally {
+      setCardDeleting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -203,6 +316,9 @@ export default function CartoesPage() {
           >
             <Upload className="h-4 w-4 mr-1" /> Importar Fatura
           </Button>
+          <Button variant="outline" onClick={openCreateCard}>
+            <Plus className="h-4 w-4 mr-1" /> Novo Cartão
+          </Button>
         </div>
       </div>
 
@@ -226,7 +342,31 @@ export default function CartoesPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CreditCard className="h-5 w-5 text-primary" />
-                  <Badge variant="secondary">{card.bank}</Badge>
+                  <div className="flex items-center gap-1">
+                    <Badge variant="secondary">{card.bank}</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditCard(card);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openDeleteCard(card);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </div>
                 </div>
                 <CardTitle className="text-base">{card.name}</CardTitle>
               </CardHeader>
@@ -234,6 +374,19 @@ export default function CartoesPage() {
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Fecha dia {card.closingDay}</span>
                   <span>Vence dia {card.dueDay}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge variant="outline">
+                    {card.linkedTransactionsCount ?? 0} lançamentos
+                  </Badge>
+                  <Badge variant="outline">
+                    {card.activeInstallmentsCount ?? 0} parcelas ativas
+                  </Badge>
+                  {(card.canDelete ?? false) ? (
+                    <Badge variant="secondary">Pode excluir</Badge>
+                  ) : (
+                    <Badge variant="secondary">Em uso</Badge>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -439,6 +592,141 @@ export default function CartoesPage() {
               <Button onClick={handleImport} disabled={importing || !importCard || !importFile}>
                 {importing && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
                 Importar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cardModalOpen} onOpenChange={setCardModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCard ? "Editar Cartão" : "Novo Cartão"}</DialogTitle>
+          </DialogHeader>
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Nome</label>
+              <input
+                type="text"
+                value={cardForm.name}
+                onChange={(e) => setCardForm({ ...cardForm, name: e.target.value })}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                placeholder="Ex: Inter Black"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Banco</label>
+              <input
+                type="text"
+                value={cardForm.bank}
+                onChange={(e) => setCardForm({ ...cardForm, bank: e.target.value })}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                placeholder="Ex: Inter"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Dia do Fechamento</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={cardForm.closingDay}
+                  onChange={(e) => setCardForm({ ...cardForm, closingDay: e.target.value })}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Dia do Vencimento</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={cardForm.dueDay}
+                  onChange={(e) => setCardForm({ ...cardForm, dueDay: e.target.value })}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <DialogClose asChild>
+                <Button variant="outline">Cancelar</Button>
+              </DialogClose>
+              <Button
+                onClick={handleSaveCard}
+                disabled={
+                  cardSaving ||
+                  !cardForm.name.trim() ||
+                  !cardForm.bank.trim() ||
+                  !cardForm.closingDay ||
+                  !cardForm.dueDay
+                }
+              >
+                {cardSaving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {editingCard ? "Salvar" : "Criar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cardDeleteOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCardDeleteOpen(false);
+            setCardToDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir Cartão</DialogTitle>
+          </DialogHeader>
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {cardToDelete?.canDelete
+                ? `Tem certeza que deseja excluir o cartão ${cardToDelete.name}?`
+                : `O cartão ${cardToDelete?.name ?? ""} ainda possui lançamentos ou faturas vinculadas.`}
+            </p>
+
+            {cardToDelete && (
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span>Lançamentos vinculados</span>
+                  <span className="font-medium">{cardToDelete.linkedTransactionsCount ?? 0}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <span>Parcelas ativas</span>
+                  <span className="font-medium">{cardToDelete.activeInstallmentsCount ?? 0}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <span>Faturas registradas</span>
+                  <span className="font-medium">{cardToDelete.statementsCount ?? 0}</span>
+                </div>
+              </div>
+            )}
+
+            {!cardToDelete?.canDelete && (
+              <p className="text-xs text-muted-foreground">
+                Para excluir este cartão, primeiro remova ou desvincule as despesas e faturas associadas.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="outline">Fechar</Button>
+              </DialogClose>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteCard}
+                disabled={cardDeleting || !cardToDelete?.canDelete}
+              >
+                {cardDeleting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                Excluir
               </Button>
             </div>
           </div>

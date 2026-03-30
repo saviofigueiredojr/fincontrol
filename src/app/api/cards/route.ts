@@ -17,27 +17,57 @@ export async function GET() {
     const cards = await prisma.creditCard.findMany({
       where: { userId },
       include: {
-        statements: {
-          orderBy: { competencia: "desc" },
-          include: {
-            transactions: {
-              select: {
-                id: true,
-                description: true,
-                amount: true,
-                category: true,
-                date: true,
-                installmentCurrent: true,
-                installmentTotal: true,
-              },
-            },
+        _count: {
+          select: {
+            statements: true,
           },
         },
       },
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json(cards);
+    const cardsWithStats = await Promise.all(
+      cards.map(async (card) => {
+        const linkedTransactions = await prisma.transaction.findMany({
+          where: {
+            userId,
+            cardStatement: {
+              cardId: card.id,
+            },
+          },
+          select: {
+            id: true,
+            parentId: true,
+            installmentTotal: true,
+            installmentCurrent: true,
+            competencia: true,
+          },
+        });
+
+        const installmentGroupIds = new Set(
+          linkedTransactions
+            .filter(
+              (transaction) =>
+                transaction.installmentTotal !== null && transaction.installmentCurrent !== null
+            )
+            .map((transaction) => transaction.parentId ?? transaction.id)
+        );
+
+        return {
+          id: card.id,
+          name: card.name,
+          bank: card.bank,
+          closingDay: card.closingDay,
+          dueDay: card.dueDay,
+          linkedTransactionsCount: linkedTransactions.length,
+          activeInstallmentsCount: installmentGroupIds.size,
+          statementsCount: card._count.statements,
+          canDelete: linkedTransactions.length === 0 && card._count.statements === 0,
+        };
+      })
+    );
+
+    return NextResponse.json(cardsWithStats);
   } catch (error) {
     console.error("List cards error:", error);
     return NextResponse.json(
@@ -81,7 +111,13 @@ export async function POST(request: NextRequest) {
     }
 
     const card = await prisma.creditCard.create({
-      data: { name, bank, closingDay, dueDay, userId },
+      data: {
+        name: String(name).trim(),
+        bank: String(bank).trim(),
+        closingDay,
+        dueDay,
+        userId,
+      },
     });
 
     return NextResponse.json(card, { status: 201 });
