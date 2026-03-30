@@ -110,6 +110,7 @@ const emptyForm = {
   isSecret: false,
   isRecurring: false,
   recurringId: null as string | null,
+  recurringEndDate: "",
   currentInstallment: "",
   totalInstallments: "",
 };
@@ -201,6 +202,7 @@ export default function LancamentosPage() {
       isSecret: tx.isSecret ?? false,
       isRecurring: tx.isRecurring ?? false,
       recurringId: tx.recurringId ?? null,
+      recurringEndDate: "",
       currentInstallment: tx.currentInstallment ? String(tx.currentInstallment) : "",
       totalInstallments: tx.totalInstallments ? String(tx.totalInstallments) : "",
     });
@@ -211,6 +213,34 @@ export default function LancamentosPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
+      if (!editingId && form.isRecurring) {
+        const recurringPayload = {
+          description: form.description,
+          category: form.category,
+          amount: parseFloat(form.amount),
+          type: form.type,
+          ownership: form.ownership,
+          dayOfMonth: new Date(form.date).getDate(),
+          startDate: competencia,
+          endDate: form.recurringEndDate || undefined,
+        };
+
+        const recurringRes = await fetch("/api/recurring", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(recurringPayload),
+        });
+
+        if (!recurringRes.ok) {
+          const recurringJson = await recurringRes.json().catch(() => ({}));
+          throw new Error(recurringJson?.error || "Erro ao criar recorrencia");
+        }
+
+        setModalOpen(false);
+        fetchData();
+        return;
+      }
+
       const body = {
         date: form.date,
         description: form.description,
@@ -219,8 +249,8 @@ export default function LancamentosPage() {
         type: form.type,
         ownership: form.ownership,
         isSecret: form.isSecret,
-        installmentCurrent: form.currentInstallment ? parseInt(form.currentInstallment, 10) : null,
-        installmentTotal: form.totalInstallments ? parseInt(form.totalInstallments, 10) : null,
+        installmentCurrent: form.isRecurring ? null : form.currentInstallment ? parseInt(form.currentInstallment, 10) : null,
+        installmentTotal: form.isRecurring ? null : form.totalInstallments ? parseInt(form.totalInstallments, 10) : null,
         applyToSeries: editingId && form.isRecurring ? applyToSeries : undefined,
         competencia,
       };
@@ -277,13 +307,13 @@ export default function LancamentosPage() {
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Buscar descricao..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 pl-9 pr-3 rounded-md border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className="w-full h-9 rounded-md border bg-background pl-11 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
 
@@ -542,6 +572,54 @@ export default function LancamentosPage() {
               </div>
             </div>
 
+            {!editingId && (
+              <div className="flex items-center gap-3 py-1">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isRecurring}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        isRecurring: e.target.checked,
+                        currentInstallment: e.target.checked ? "" : form.currentInstallment,
+                        totalInstallments: e.target.checked ? "" : form.totalInstallments,
+                      })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 rounded-full bg-gray-200 peer dark:bg-gray-700 peer-checked:bg-primary" />
+                </label>
+                <div>
+                  <span className="text-sm font-medium">Lancamento recorrente</span>
+                  <p className="text-xs text-muted-foreground">
+                    Cria a recorrencia e gera as proximas ocorrencias automaticamente.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!editingId && form.isRecurring && (
+              <div className="rounded-lg border border-border/70 bg-muted/40 p-3 space-y-3">
+                <p className="text-sm font-medium">Configuracao da recorrencia</p>
+                <p className="text-xs text-muted-foreground">
+                  A recorrencia comeca nesta competencia e materializa os proximos meses automaticamente.
+                </p>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Encerrar em</label>
+                  <input
+                    type="month"
+                    value={form.recurringEndDate}
+                    onChange={(e) => setForm({ ...form, recurringEndDate: e.target.value })}
+                    className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Deixe em branco para manter ativa por padrao nos proximos meses.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {editingId && form.isRecurring && (
               <div className="rounded-lg border border-border/70 bg-muted/40 p-3">
                 <label className="flex items-start gap-3">
@@ -561,7 +639,7 @@ export default function LancamentosPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid grid-cols-2 gap-3 ${form.isRecurring && !editingId ? "opacity-50" : ""}`}>
               <div>
                 <label className="text-sm font-medium mb-1 block">Parcela Atual</label>
                 <input
@@ -570,6 +648,7 @@ export default function LancamentosPage() {
                   placeholder="Ex: 3"
                   value={form.currentInstallment}
                   onChange={(e) => setForm({ ...form, currentInstallment: e.target.value })}
+                  disabled={form.isRecurring && !editingId}
                   className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
@@ -581,6 +660,7 @@ export default function LancamentosPage() {
                   placeholder="Ex: 12"
                   value={form.totalInstallments}
                   onChange={(e) => setForm({ ...form, totalInstallments: e.target.value })}
+                  disabled={form.isRecurring && !editingId}
                   className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>

@@ -3,8 +3,58 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
+import { shiftCompetencia } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+const DEFAULT_GENERATION_HORIZON_MONTHS = 24;
+
+function getPartnerUserId(memberIds: string[], currentUserId: string) {
+  return memberIds.find((memberId) => memberId !== currentUserId) ?? currentUserId;
+}
+
+function getTransactionUserId(
+  ownership: string,
+  currentUserId: string,
+  memberIds: string[]
+) {
+  if (ownership === "mine") {
+    return currentUserId;
+  }
+
+  if (ownership === "partner") {
+    return getPartnerUserId(memberIds, currentUserId);
+  }
+
+  return currentUserId;
+}
+
+function getDateForCompetencia(competencia: string, desiredDay: number) {
+  const [year, month] = competencia.split("-").map(Number);
+  const maxDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(Math.max(desiredDay, 1), maxDay);
+  return new Date(year, month - 1, safeDay);
+}
+
+function shouldCreateOccurrence(
+  startDate: string,
+  competencia: string,
+  interval: string,
+  intervalCount: number
+) {
+  const [startYear, startMonth] = startDate.split("-").map(Number);
+  const [currentYear, currentMonth] = competencia.split("-").map(Number);
+  const monthsDiff = (currentYear - startYear) * 12 + (currentMonth - startMonth);
+
+  if (monthsDiff < 0) {
+    return false;
+  }
+
+  if (interval === "yearly") {
+    return monthsDiff % (12 * intervalCount) === 0;
+  }
+
+  return monthsDiff % intervalCount === 0;
+}
 
 export async function GET() {
   try {
@@ -39,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = (session.user as { id: string }).id;
-    const { householdId } = await getHouseholdForUser(userId);
+    const { householdId, memberIds } = await getHouseholdForUser(userId);
 
     const body = await request.json();
     const {
@@ -91,22 +141,56 @@ export async function POST(request: NextRequest) {
 
     const finalIsVariable = typeof isVariable === "boolean" ? isVariable : false;
 
-    const template = await prisma.recurringTemplate.create({
-      data: {
-        description,
-        category,
-        amount,
-        type,
-        ownership,
-        dayOfMonth,
-        startDate,
-        endDate: endDate || null,
-        interval: finalInterval,
-        intervalCount: finalIntervalCount,
-        isVariable: finalIsVariable,
-        isActive: true,
-        householdId,
-      },
+    const template = await prisma.$transaction(async (db) => {
+      const createdTemplate = await db.recurringTemplate.create({
+        data: {
+          description,
+          category,
+          amount,
+          type,
+          ownership,
+          dayOfMonth,
+          startDate,
+          endDate: endDate || null,
+          interval: finalInterval,
+          intervalCount: finalIntervalCount,
+          isVariable: finalIsVariable,
+          isActive: true,
+          householdId,
+        },
+      });
+
+      const transactionUserId = getTransactionUserId(ownership, userId, memberIds);
+      const lastCompetencia = endDate || shiftCompetencia(startDate, DEFAULT_GENERATION_HORIZON_MONTHS - 1);
+
+      const competencias: string[] = [];
+      let cursor = startDate;
+      while (cursor <= lastCompetencia) {
+        if (shouldCreateOccurrence(startDate, cursor, finalInterval, finalIntervalCount)) {
+          competencias.push(cursor);
+        }
+        cursor = shiftCompetencia(cursor, 1);
+      }
+
+      if (competencias.length > 0) {
+        await db.transaction.createMany({
+          data: competencias.map((competencia) => ({
+            date: getDateForCompetencia(competencia, dayOfMonth),
+            competencia,
+            description,
+            category,
+            amount,
+            type,
+            ownership,
+            isRecurring: true,
+            recurringId: createdTemplate.id,
+            source: "recurring",
+            userId: transactionUserId,
+          })),
+        });
+      }
+
+      return createdTemplate;
     });
 
     return NextResponse.json(template, { status: 201 });
