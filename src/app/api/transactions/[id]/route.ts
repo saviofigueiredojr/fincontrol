@@ -79,13 +79,16 @@ export async function DELETE(
     }
 
     const { memberIds } = await getHouseholdForUser(sessionUser.id);
+    const rawScope = request.nextUrl.searchParams.get("scope");
+    const scope = rawScope === "series" ? "series" : "single";
     const result = await deleteScopedTransaction(
       {
         userId: sessionUser.id,
         userRole: sessionUser.role,
         memberIds,
       },
-      params.id
+      params.id,
+      scope
     );
 
     if (result.kind === "not_found") {

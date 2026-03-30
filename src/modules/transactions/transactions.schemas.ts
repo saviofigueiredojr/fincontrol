@@ -32,6 +32,15 @@ export const createTransactionSchema = z.object({
   installmentTotal: z.number().int().positive().nullable().optional(),
   source: z.string().trim().min(1).optional().default("manual"),
   isSecret: z.boolean().optional().default(false),
+  cardId: z.string().trim().min(1).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (value.cardId && value.type !== "expense") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Somente despesas podem ser vinculadas a cartão de crédito",
+      path: ["cardId"],
+    });
+  }
 });
 
 export const updateTransactionSchema = z
@@ -46,11 +55,21 @@ export const updateTransactionSchema = z
     installmentCurrent: z.number().int().positive().nullable().optional(),
     installmentTotal: z.number().int().positive().nullable().optional(),
     source: z.string().trim().min(1).optional(),
+    cardId: z.string().trim().min(1).nullable().optional(),
     cardStatementId: z.string().trim().min(1).nullable().optional(),
     isRecurring: z.boolean().optional(),
     recurringId: z.string().trim().min(1).nullable().optional(),
     isSecret: z.boolean().optional(),
     applyToSeries: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.cardId && value.type && value.type !== "expense") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Somente despesas podem ser vinculadas a cartão de crédito",
+        path: ["cardId"],
+      });
+    }
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided",

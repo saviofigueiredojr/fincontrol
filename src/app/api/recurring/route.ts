@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
+import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
 import { shiftCompetencia } from "@/lib/utils";
@@ -97,6 +98,9 @@ export async function POST(request: NextRequest) {
       dayOfMonth, startDate, endDate,
       interval, intervalCount, isVariable
     } = body;
+    const cardId = typeof body.cardId === "string" && body.cardId.trim().length > 0
+      ? body.cardId.trim()
+      : null;
 
     if (!description || !category || !amount || !type || !ownership || !dayOfMonth || !startDate) {
       return NextResponse.json(
@@ -121,6 +125,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "amount deve ser um número positivo" }, { status: 400 });
     }
 
+    if (cardId && type !== "expense") {
+      return NextResponse.json(
+        { error: "Somente despesas podem ser vinculadas a cartão de crédito" },
+        { status: 400 }
+      );
+    }
+
     if (!/^\d{4}-\d{2}$/.test(startDate)) {
       return NextResponse.json({ error: "startDate deve ser YYYY-MM" }, { status: 400 });
     }
@@ -140,6 +151,13 @@ export async function POST(request: NextRequest) {
     }
 
     const finalIsVariable = typeof isVariable === "boolean" ? isVariable : false;
+    const selectedCard = cardId
+      ? await getScopedCreditCard(prisma, cardId, memberIds)
+      : null;
+
+    if (cardId && !selectedCard) {
+      return NextResponse.json({ error: "Cartão selecionado não encontrado" }, { status: 404 });
+    }
 
     const template = await prisma.$transaction(async (db) => {
       const createdTemplate = await db.recurringTemplate.create({
@@ -173,21 +191,28 @@ export async function POST(request: NextRequest) {
       }
 
       if (competencias.length > 0) {
-        await db.transaction.createMany({
-          data: competencias.map((competencia) => ({
-            date: getDateForCompetencia(competencia, dayOfMonth),
-            competencia,
-            description,
-            category,
-            amount,
-            type,
-            ownership,
-            isRecurring: true,
-            recurringId: createdTemplate.id,
-            source: "recurring",
-            userId: transactionUserId,
-          })),
-        });
+        for (const competencia of competencias) {
+          const statementId = selectedCard
+            ? (await getOrCreateCardStatement(db, selectedCard.id, competencia)).id
+            : null;
+
+          await db.transaction.create({
+            data: {
+              date: getDateForCompetencia(competencia, dayOfMonth),
+              competencia,
+              description,
+              category,
+              amount,
+              type,
+              ownership,
+              isRecurring: true,
+              recurringId: createdTemplate.id,
+              source: "recurring",
+              userId: transactionUserId,
+              cardStatementId: statementId,
+            },
+          });
+        }
       }
 
       return createdTemplate;

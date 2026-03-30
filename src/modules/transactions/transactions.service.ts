@@ -1,4 +1,5 @@
 import { Transaction } from "@prisma/client";
+import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import {
   CreateTransactionInput,
@@ -11,6 +12,8 @@ export interface TransactionActor {
   userRole: string;
   memberIds: string[];
 }
+
+export type TransactionDeleteScope = "single" | "series";
 
 function getPartnerUserId(actor: TransactionActor) {
   return actor.memberIds.find((memberId) => memberId !== actor.userId) ?? actor.userId;
@@ -64,6 +67,7 @@ function buildTransactionUpdateData(
     date,
     competencia,
     ownership,
+    cardId: _cardId,
     ...rest
   } = input;
 
@@ -118,6 +122,21 @@ function buildSecretFilter(userId: string) {
   };
 }
 
+async function resolveCardStatementId(
+  actor: Pick<TransactionActor, "memberIds">,
+  cardId: string,
+  competencia: string
+) {
+  const card = await getScopedCreditCard(prisma, cardId, actor.memberIds);
+
+  if (!card) {
+    throw new Error("Cartão selecionado não foi encontrado");
+  }
+
+  const statement = await getOrCreateCardStatement(prisma, card.id, competencia);
+  return statement.id;
+}
+
 export async function listVisibleTransactions(
   actor: Pick<TransactionActor, "userId" | "memberIds">,
   filters: ListTransactionsQuery
@@ -134,11 +153,9 @@ export async function listVisibleTransactions(
     where.ownership = "joint";
     where.AND = [buildSecretFilter(actor.userId)];
   } else if (filters.ownership === "mine") {
-    where.userId = actor.userId;
-    where.ownership = { not: "joint" };
+    where.ownership = "mine";
   } else if (filters.ownership === "partner") {
-    where.userId = { in: actor.memberIds.filter((memberId) => memberId !== actor.userId) };
-    where.ownership = { not: "joint" };
+    where.ownership = "partner";
     where.AND = [buildSecretFilter(actor.userId)];
   } else {
     where.AND = [buildSecretFilter(actor.userId)];
@@ -153,7 +170,20 @@ export async function listVisibleTransactions(
   }
 
   if (filters.search) {
-    where.description = { contains: filters.search };
+    where.OR = [
+      { description: { contains: filters.search, mode: "insensitive" } },
+      {
+        cardStatement: {
+          is: {
+            card: {
+              is: {
+                name: { contains: filters.search, mode: "insensitive" },
+              },
+            },
+          },
+        },
+      },
+    ];
   }
 
   return prisma.transaction.findMany({
@@ -161,18 +191,39 @@ export async function listVisibleTransactions(
     orderBy: { date: "desc" },
     include: {
       cardStatement: {
-        include: { card: { select: { name: true, bank: true } } },
+        include: { card: { select: { id: true, name: true, bank: true } } },
       },
     },
   });
 }
 
 export async function createTransactionWithInstallments(
-  userId: string,
+  actor: Pick<TransactionActor, "userId" | "memberIds">,
   input: CreateTransactionInput
 ) {
   return prisma.$transaction(async (transactionClient) => {
     const parsedDate = new Date(input.date);
+    const ownerUserId =
+      input.ownership === "partner"
+        ? actor.memberIds.find((memberId) => memberId !== actor.userId) ?? actor.userId
+        : actor.userId;
+    const selectedCard = input.cardId
+      ? await getScopedCreditCard(transactionClient, input.cardId, actor.memberIds)
+      : null;
+
+    if (input.cardId && !selectedCard) {
+      throw new Error("Cartão selecionado não foi encontrado");
+    }
+    const mainStatementId =
+      selectedCard
+        ? (
+            await getOrCreateCardStatement(
+              transactionClient,
+              selectedCard.id,
+              input.competencia
+            )
+          ).id
+        : null;
 
     const mainTransaction = await transactionClient.transaction.create({
       data: {
@@ -190,7 +241,8 @@ export async function createTransactionWithInstallments(
         installmentTotal: input.installmentTotal ?? null,
         isSecret: input.isSecret,
         source: input.source,
-        userId,
+        userId: ownerUserId,
+        cardStatementId: mainStatementId,
       },
     });
 
@@ -211,6 +263,16 @@ export async function createTransactionWithInstallments(
         const futureCompetencia = `${futureComp.getFullYear()}-${String(
           futureComp.getMonth() + 1
         ).padStart(2, "0")}`;
+        const futureStatementId =
+          selectedCard
+            ? (
+                await getOrCreateCardStatement(
+                  transactionClient,
+                  selectedCard.id,
+                  futureCompetencia
+                )
+              ).id
+            : null;
 
         const installment = await transactionClient.transaction.create({
           data: {
@@ -226,7 +288,8 @@ export async function createTransactionWithInstallments(
             isSecret: input.isSecret,
             parentId: mainTransaction.id,
             source: input.source,
-            userId,
+            userId: ownerUserId,
+            cardStatementId: futureStatementId,
           },
         });
 
@@ -243,6 +306,13 @@ async function getScopedTransaction(actor: TransactionActor, transactionId: stri
     where: {
       id: transactionId,
       userId: { in: actor.memberIds },
+    },
+    include: {
+      cardStatement: {
+        select: {
+          cardId: true,
+        },
+      },
     },
   });
 }
@@ -266,8 +336,28 @@ export async function updateScopedTransaction(
     return { kind: "forbidden" as const };
   }
 
+  const selectedCard = input.cardId
+    ? await getScopedCreditCard(prisma, input.cardId, actor.memberIds)
+    : null;
+
+  if (input.cardId && !selectedCard) {
+    throw new Error("Cartão selecionado não foi encontrado");
+  }
+
   if (!input.applyToSeries || !existing.isRecurring || !existing.recurringId) {
     const data = buildTransactionUpdateData(actor, existing.userId, input);
+    const effectiveCompetencia =
+      typeof data.competencia === "string"
+        ? data.competencia
+        : existing.competencia;
+    const requestedCardId =
+      input.cardId !== undefined ? input.cardId : existing.cardStatement?.cardId;
+
+    if (input.cardId !== undefined || (requestedCardId && input.competencia !== undefined)) {
+      data.cardStatementId = requestedCardId
+        ? await resolveCardStatementId(actor, requestedCardId, effectiveCompetencia)
+        : null;
+    }
 
     const updated = await prisma.transaction.update({
       where: { id: transactionId },
@@ -281,6 +371,24 @@ export async function updateScopedTransaction(
 
   const updated = await prisma.$transaction(async (transactionClient) => {
     const currentUpdateData = buildTransactionUpdateData(actor, existing.userId, input);
+    const currentCompetencia =
+      typeof currentUpdateData.competencia === "string"
+        ? currentUpdateData.competencia
+        : existing.competencia;
+    const requestedCardId =
+      input.cardId !== undefined ? input.cardId : existing.cardStatement?.cardId;
+
+    if (input.cardId !== undefined || (requestedCardId && input.competencia !== undefined)) {
+      currentUpdateData.cardStatementId = requestedCardId
+        ? (
+            await getOrCreateCardStatement(
+              transactionClient,
+              selectedCard?.id ?? requestedCardId,
+              currentCompetencia
+            )
+          ).id
+        : null;
+    }
 
     const currentTransaction = await transactionClient.transaction.update({
       where: { id: transactionId },
@@ -310,6 +418,18 @@ export async function updateScopedTransaction(
         futureTransaction.competencia
       );
 
+      if (input.cardId !== undefined || requestedCardId) {
+        futureUpdateData.cardStatementId = requestedCardId
+          ? (
+              await getOrCreateCardStatement(
+                transactionClient,
+                selectedCard?.id ?? requestedCardId,
+                futureTransaction.competencia
+              )
+            ).id
+          : null;
+      }
+
       await transactionClient.transaction.update({
         where: { id: futureTransaction.id },
         data: futureUpdateData,
@@ -330,7 +450,11 @@ export async function updateScopedTransaction(
   return { kind: "ok" as const, transaction: updated };
 }
 
-export async function deleteScopedTransaction(actor: TransactionActor, transactionId: string) {
+export async function deleteScopedTransaction(
+  actor: TransactionActor,
+  transactionId: string,
+  scope: TransactionDeleteScope = "single"
+) {
   const existing = await getScopedTransaction(actor, transactionId);
 
   if (!existing) {
@@ -342,6 +466,21 @@ export async function deleteScopedTransaction(actor: TransactionActor, transacti
   }
 
   await prisma.$transaction(async (transactionClient) => {
+    if (scope === "series" && existing.isRecurring && existing.recurringId) {
+      await transactionClient.transaction.deleteMany({
+        where: {
+          recurringId: existing.recurringId,
+          userId: { in: actor.memberIds },
+        },
+      });
+
+      await transactionClient.recurringTemplate.deleteMany({
+        where: { id: existing.recurringId },
+      });
+
+      return;
+    }
+
     await transactionClient.transaction.deleteMany({
       where: { parentId: transactionId },
     });

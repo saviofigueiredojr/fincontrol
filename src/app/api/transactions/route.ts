@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    const { memberIds } = await getHouseholdForUser(sessionUser.id);
     const body = await request.json();
     const parsedBody = createTransactionSchema.safeParse(body);
 
@@ -71,7 +72,10 @@ export async function POST(request: NextRequest) {
     }
 
     const createdTransactions = await createTransactionWithInstallments(
-      sessionUser.id,
+      {
+        userId: sessionUser.id,
+        memberIds,
+      },
       parsedBody.data
     );
 
