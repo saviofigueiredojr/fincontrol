@@ -145,8 +145,10 @@ export default function CartoesPage() {
         method: "POST",
         body: formData,
       });
-      if (!res.ok) throw new Error("Erro ao importar fatura");
       const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || "Erro ao importar fatura");
+      }
       setImportResult(json.count ?? 0);
       fetchCardTransactions();
       fetchInstallments();
@@ -190,7 +192,15 @@ export default function CartoesPage() {
           <Button variant="outline" size="icon" onClick={() => setCompetencia(nextCompetencia(competencia))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button onClick={() => { setImportOpen(true); setImportResult(null); setImportFile(null); }}>
+          <Button
+            onClick={() => {
+              setImportOpen(true);
+              setImportResult(null);
+              setImportFile(null);
+              setImportCard(selectedCard);
+              setImportCompetencia(competencia);
+            }}
+          >
             <Upload className="h-4 w-4 mr-1" /> Importar Fatura
           </Button>
         </div>
@@ -410,6 +420,9 @@ export default function CartoesPage() {
                 onChange={(e) => setImportCompetencia(e.target.value)}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Reimportar substitui a fatura aberta deste cartao nessa competencia e recria as parcelas futuras derivadas dela.
+              </p>
             </div>
 
             {importResult !== null && (

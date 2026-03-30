@@ -1,16 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { shiftCompetencia } from "@/lib/utils";
 import { ImportTransactionsInput, supportedImportFormats } from "./import.schemas";
 import { FallbackCategorizerService } from "./fallback-categorizer.service";
-import { AiCategorizerService } from "./ai-categorizer.service";
 
 type DatabaseClient = typeof prisma | Prisma.TransactionClient;
-
-const VALID_CATEGORIES = [
-  "Alimentação", "Transporte", "Assinaturas", "Moradia", "Saúde",
-  "Educação", "Lazer", "Compras", "Serviços", "Transferência / Pagamento",
-  "Impostos PJ", "Crédito PJ", "Receita", "Outros"
-];
 
 function parseBRLCurrency(value: string): number {
   const cleaned = value.replace(/R\$\s*/g, "").trim();
@@ -44,6 +38,13 @@ function parseInstallment(tipo: string) {
 
 function competenciaFromDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getDateForCompetencia(competencia: string, referenceDay: number) {
+  const [year, month] = competencia.split("-").map(Number);
+  const maxDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(Math.max(referenceDay, 1), maxDay);
+  return new Date(year, month - 1, safeDay);
 }
 
 function parseCSVLine(line: string) {
@@ -193,7 +194,8 @@ async function importInterCsv(
   db: DatabaseClient,
   content: string,
   cardId: string,
-  userId: string
+  userId: string,
+  selectedCompetencia?: string
 ) {
   const lines = content.split("\n").filter((line) => line.trim().length > 0);
 
@@ -203,7 +205,6 @@ async function importInterCsv(
 
   const dataLines = lines.slice(1);
 
-  // 1. Pass: Collect all valid parsed rows
   const parsedRows = [];
   for (const line of dataLines) {
     const columns = parseCSVLine(line);
@@ -216,11 +217,12 @@ async function importInterCsv(
     const date = parseBRDate(dateValue);
     if (Number.isNaN(date.getTime())) continue;
 
-    const competencia = competenciaFromDate(date);
+    const competencia = selectedCompetencia || competenciaFromDate(date);
     const installment = parseInstallment(tipo);
 
     parsedRows.push({
-      date,
+      date: getDateForCompetencia(competencia, date.getDate()),
+      referenceDay: date.getDate(),
       description: description.trim(),
       rawCategory: category.trim(),
       amount,
@@ -230,25 +232,12 @@ async function importInterCsv(
     });
   }
 
-  // 2. Pass: AI Classification batching
-  const unknowns = parsedRows
-    .map(r => ({ desc: r.description, fallback: FallbackCategorizerService.categorize(r.description, r.rawCategory) }))
-    .filter(r => !r.fallback)
-    .map(r => r.desc);
-
-  const aiMap = unknowns.length > 0
-    ? await AiCategorizerService.categorizeBatch(unknowns, VALID_CATEGORIES)
-    : {};
-
-  // 3. Pass: Database Insertion
   const statementIds: string[] = [];
   let count = 0;
 
   for (const row of parsedRows) {
-    let finalCategory = FallbackCategorizerService.categorize(row.description, row.rawCategory);
-    if (!finalCategory) {
-      finalCategory = aiMap[row.description] || row.rawCategory || "Outros";
-    }
+    const finalCategory =
+      FallbackCategorizerService.categorize(row.description, row.rawCategory) || "Outros";
 
     const statement = await getOrCreateStatement(db, cardId, row.competencia);
     statementIds.push(statement.id);
@@ -278,10 +267,11 @@ async function importInterCsv(
         installmentIndex <= row.installment.total;
         installmentIndex += 1
       ) {
-        const futureDate = new Date(row.date);
-        futureDate.setMonth(futureDate.getMonth() + (installmentIndex - 1));
-
-        const futureCompetencia = competenciaFromDate(futureDate);
+        const futureCompetencia = shiftCompetencia(row.competencia, installmentIndex - 1);
+        const futureDate = getDateForCompetencia(
+          futureCompetencia,
+          row.referenceDay
+        );
         const futureStatement = await getOrCreateStatement(
           db,
           cardId,
@@ -320,13 +310,13 @@ async function importOfx(
   db: DatabaseClient,
   content: string,
   cardId: string,
-  userId: string
+  userId: string,
+  selectedCompetencia?: string
 ) {
   const transactionRegex = /<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi;
   let match: RegExpExecArray | null;
   const parsedRows = [];
 
-  // 1. Pass: Collect
   while ((match = transactionRegex.exec(content)) !== null) {
     const block = match[1];
     const postedAt = extractOFXField(block, "DTPOSTED");
@@ -347,33 +337,23 @@ async function importOfx(
 
     const parsedAmount = parseFloat(rawAmount);
     parsedRows.push({
-      date,
+      date: getDateForCompetencia(
+        selectedCompetencia || competenciaFromDate(date),
+        date.getDate()
+      ),
       description: description.trim(),
       amount: Math.abs(parsedAmount),
       rawAmount: parsedAmount,
-      competencia: competenciaFromDate(date),
+      competencia: selectedCompetencia || competenciaFromDate(date),
     });
   }
 
-  // 2. Pass: Categorize
-  const unknowns = parsedRows
-    .map(r => ({ desc: r.description, fallback: FallbackCategorizerService.categorize(r.description) }))
-    .filter(r => !r.fallback)
-    .map(r => r.desc);
-
-  const aiMap = unknowns.length > 0
-    ? await AiCategorizerService.categorizeBatch(unknowns, VALID_CATEGORIES)
-    : {};
-
-  // 3. Pass: Insert
   const statementIds: string[] = [];
   let count = 0;
 
   for (const row of parsedRows) {
-    let finalCategory = FallbackCategorizerService.categorize(row.description);
-    if (!finalCategory) {
-      finalCategory = aiMap[row.description] || "Outros";
-    }
+    const finalCategory =
+      FallbackCategorizerService.categorize(row.description) || "Outros";
 
     const statement = await getOrCreateStatement(db, cardId, row.competencia);
     statementIds.push(statement.id);
@@ -437,14 +417,14 @@ export async function importTransactionsFromStatement(
 
     const imported =
       importFormat === ".csv"
-        ? await importInterCsv(db, content, input.cardId, userId)
-        : await importOfx(db, content, input.cardId, userId);
+        ? await importInterCsv(db, content, input.cardId, userId, input.competencia)
+        : await importOfx(db, content, input.cardId, userId, input.competencia);
 
     statementIdsToRefresh.push(...imported.statementIds);
     await refreshStatementTotals(db, statementIdsToRefresh);
 
     return imported.count;
-  }, { timeout: 25000 }); // Provide extra timeout to allow external LLM calls to complete reliably
+  }, { timeout: 25000 });
 
   return { kind: "ok" as const, count: result };
 }
