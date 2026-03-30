@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Users,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -15,6 +14,17 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  createFallbackHouseholdDisplayContext,
+  getPartnerDisplayName,
+  getSelfDisplayName,
+  type HouseholdDisplayContext,
+} from "@/lib/household-display";
+import {
+  DEFAULT_PARTNER_BENEFIT,
+  DEFAULT_PARTNER_INCOME,
+  DEFAULT_PRIMARY_INCOME,
+} from "@/lib/app-defaults";
+import {
   formatCurrency,
   getCurrentCompetencia,
   competenciaToLabel,
@@ -24,6 +34,7 @@ import {
 
 interface Transaction {
   id: string;
+  userId: string;
   description: string;
   amount: number;
   type: "income" | "expense";
@@ -41,17 +52,24 @@ export default function DivisaoPage() {
   const [mode, setMode] = useState<"equal" | "proportional" | "custom">("proportional");
   const [customPercent, setCustomPercent] = useState(50);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [settings, setSettings] = useState<Settings>({ myIncome: 8000.00, partnerIncome: 7700.00 });
+  const [settings, setSettings] = useState<Settings>({
+    myIncome: DEFAULT_PRIMARY_INCOME,
+    partnerIncome: DEFAULT_PARTNER_INCOME + DEFAULT_PARTNER_BENEFIT,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [householdContext, setHouseholdContext] = useState<HouseholdDisplayContext>(
+    createFallbackHouseholdDisplayContext()
+  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [txRes, settingsRes] = await Promise.all([
+      const [txRes, settingsRes, contextRes] = await Promise.all([
         fetch(`/api/transactions?competencia=${competencia}`),
         fetch("/api/settings"),
+        fetch("/api/household/context"),
       ]);
 
       if (!txRes.ok) throw new Error("Erro ao carregar lancamentos");
@@ -60,10 +78,26 @@ export default function DivisaoPage() {
 
       if (settingsRes.ok) {
         const sJson = await settingsRes.json();
-        const myIncome = parseFloat(sJson.primary_income || "8000.00");
-        const partnerBase = parseFloat(sJson.partner_income || "6800.00");
-        const partnerVa = parseFloat(sJson.partner_va || "900.00");
+        const myIncome = parseFloat(sJson.primary_income || String(DEFAULT_PRIMARY_INCOME));
+        const partnerBase = parseFloat(sJson.partner_income || String(DEFAULT_PARTNER_INCOME));
+        const partnerVa = parseFloat(sJson.partner_va || String(DEFAULT_PARTNER_BENEFIT));
         setSettings({ myIncome, partnerIncome: partnerBase + partnerVa });
+      }
+
+      if (contextRes.ok) {
+        const contextJson = await contextRes.json();
+        setHouseholdContext({
+          self: {
+            id: String(contextJson?.self?.id ?? ""),
+            name: String(contextJson?.self?.name ?? ""),
+          },
+          partner: contextJson?.partner
+            ? {
+                id: String(contextJson.partner.id ?? ""),
+                name: String(contextJson.partner.name ?? ""),
+              }
+            : null,
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -79,10 +113,24 @@ export default function DivisaoPage() {
   const totalIncome = settings.myIncome + settings.partnerIncome;
   const myPercentage = totalIncome > 0 ? (settings.myIncome / totalIncome) * 100 : 50;
   const partnerPercentage = totalIncome > 0 ? (settings.partnerIncome / totalIncome) * 100 : 50;
+  const selfDisplayName = getSelfDisplayName(householdContext);
+  const partnerDisplayName = getPartnerDisplayName(householdContext);
+  const selfUserId = householdContext.self.id;
+  const partnerUserId = householdContext.partner?.id ?? "";
 
   const jointExpenses = transactions.filter((tx) => tx.type === "expense" && tx.ownership === "joint");
-  const myIndividualExpenses = transactions.filter((tx) => tx.type === "expense" && tx.ownership === "mine");
-  const partnerIndividualExpenses = transactions.filter((tx) => tx.type === "expense" && tx.ownership === "partner");
+  const myIndividualExpenses = transactions.filter(
+    (tx) =>
+      tx.type === "expense" &&
+      tx.ownership !== "joint" &&
+      (selfUserId ? tx.userId === selfUserId : tx.ownership === "mine")
+  );
+  const partnerIndividualExpenses = transactions.filter(
+    (tx) =>
+      tx.type === "expense" &&
+      tx.ownership !== "joint" &&
+      (partnerUserId ? tx.userId === partnerUserId : tx.ownership === "partner")
+  );
 
   const totalJoint = jointExpenses.reduce((sum, tx) => sum + tx.amount, 0);
   const totalMyIndividual = myIndividualExpenses.reduce((sum, tx) => sum + tx.amount, 0);
@@ -96,7 +144,6 @@ export default function DivisaoPage() {
 
   const myFreeBalance = settings.myIncome - myShareJoint - totalMyIndividual;
   const partnerFreeBalance = settings.partnerIncome - partnerShareJoint - totalPartnerIndividual;
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -169,8 +216,8 @@ export default function DivisaoPage() {
           <Card className="max-w-md">
             <CardContent className="pt-4 pb-4 space-y-3">
               <div className="flex justify-between text-sm font-medium">
-                <span>Eu: {customPercent.toFixed(0)}%</span>
-                <span>Ele: {(100 - customPercent).toFixed(0)}%</span>
+                <span>{selfDisplayName}: {customPercent.toFixed(0)}%</span>
+                <span>{partnerDisplayName}: {(100 - customPercent).toFixed(0)}%</span>
               </div>
               <input
                 type="range"
@@ -195,7 +242,7 @@ export default function DivisaoPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Minha Renda</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Renda {selfDisplayName}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-primary">{formatCurrency(settings.myIncome)}</p>
@@ -207,7 +254,7 @@ export default function DivisaoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Renda Namorado</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Renda {partnerDisplayName}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-primary">{formatCurrency(settings.partnerIncome)}</p>
@@ -242,8 +289,8 @@ export default function DivisaoPage() {
                 <tr className="border-b">
                   <th className="text-left py-3 px-2 font-medium text-muted-foreground">Descricao</th>
                   <th className="text-right py-3 px-2 font-medium text-muted-foreground">Valor Total</th>
-                  <th className="text-right py-3 px-2 font-medium text-muted-foreground">Minha Parte</th>
-                  <th className="text-right py-3 px-2 font-medium text-muted-foreground">Parte Dele</th>
+                  <th className="text-right py-3 px-2 font-medium text-muted-foreground">Parte {selfDisplayName}</th>
+                  <th className="text-right py-3 px-2 font-medium text-muted-foreground">Parte {partnerDisplayName}</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,7 +343,7 @@ export default function DivisaoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Minha Contribuicao</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Contribuicao {selfDisplayName}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xl font-bold text-primary">{formatCurrency(myShareJoint)}</p>
@@ -308,7 +355,7 @@ export default function DivisaoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Contribuicao Dele</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Contribuicao {partnerDisplayName}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xl font-bold text-primary">{formatCurrency(partnerShareJoint)}</p>
@@ -324,13 +371,13 @@ export default function DivisaoPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-sm">Meu</span>
+              <span className="text-sm">{selfDisplayName}</span>
               <span className={`text-base font-bold ${myFreeBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
                 {formatCurrency(myFreeBalance)}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm">Dele</span>
+              <span className="text-sm">{partnerDisplayName}</span>
               <span className={`text-base font-bold ${partnerFreeBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
                 {formatCurrency(partnerFreeBalance)}
               </span>

@@ -107,7 +107,7 @@ async function main() {
       competencia: comp0326,
       description: "Renda Líquida PJ",
       category: "Salário",
-      amount: 8000.00,
+      amount: 8000,
       type: "income",
       ownership: "mine",
       source: "manual",
@@ -122,7 +122,7 @@ async function main() {
       competencia: comp0326,
       description: "Saldo Inicial em Conta",
       category: "Saldo Anterior",
-      amount: 2500.00,
+      amount: 2500,
       type: "income",
       ownership: "mine",
       source: "manual",
@@ -132,10 +132,10 @@ async function main() {
 
   // Faturas março
   const faturas0326 = [
-    { desc: "Fatura Inter", amount: 1800.00, card: "Inter" },
-    { desc: "Fatura Caixa", amount: 950.00, card: "Caixa" },
-    { desc: "Fatura C6", amount: 420.00, card: "C6" },
-    { desc: "Fatura Nubank", amount: 210.0, card: "Nubank" },
+    { desc: "Fatura Inter", amount: 1800, card: "Inter" },
+    { desc: "Fatura Caixa", amount: 950, card: "Caixa" },
+    { desc: "Fatura C6", amount: 420, card: "C6" },
+    { desc: "Fatura Nubank", amount: 210, card: "Nubank" },
   ];
 
   for (const f of faturas0326) {
@@ -156,10 +156,10 @@ async function main() {
 
   // Custos da casa março
   const custosCasa0326 = [
-    { desc: "Aluguel pte 1", amount: 900.00 },
-    { desc: "Aluguel pte 2", amount: 260.00 },
-    { desc: "Mudança", amount: 450.0 },
-    { desc: "Internet", amount: 120.00 },
+    { desc: "Aluguel pte 1", amount: 900 },
+    { desc: "Aluguel pte 2", amount: 320 },
+    { desc: "Mudança", amount: 450 },
+    { desc: "Internet", amount: 120 },
   ];
 
   for (const c of custosCasa0326) {
@@ -179,13 +179,13 @@ async function main() {
   }
 
   // MonthClose março
-  const totalIncome0326 = 8000.00 + 2500.00;
-  const totalExpense0326 = 1800.00 + 950.00 + 420.00 + 210.0 + 900.00 + 260.00 + 450.0 + 120.00;
+  const totalIncome0326 = 8000 + 2500;
+  const totalExpense0326 = 1800 + 950 + 420 + 210 + 900 + 320 + 450 + 120;
   await prisma.monthClose.create({
     data: {
       competencia: comp0326,
       householdId: household.id,
-      openingBalance: 2500.00,
+      openingBalance: 2500,
       totalIncome: totalIncome0326,
       totalExpense: totalExpense0326,
       metaAllocation: 0,
@@ -198,9 +198,9 @@ async function main() {
 
   // Recebíveis extraordinários abril
   const recebiveisAbril = [
-    { desc: "Repasse parceiro (ajuste)", amount: 250.00 },
-    { desc: "Venda da Geladeira", amount: 400.0 },
-    { desc: "Empréstimo a receber", amount: 100.0 },
+    { desc: "Repasse parceiro (ajuste)", amount: 250 },
+    { desc: "Venda da Geladeira", amount: 600 },
+    { desc: "Empréstimo a receber", amount: 150 },
   ];
 
   for (const r of recebiveisAbril) {
@@ -224,9 +224,9 @@ async function main() {
     data: {
       date: new Date("2026-04-29"),
       competencia: "2026-04",
-      description: "Viagem Rio de Janeiro (29/04 a 05/05)",
+      description: "Viagem de feriado",
       category: "Lazer",
-      amount: 900.0,
+      amount: 900,
       type: "expense",
       ownership: "joint",
       source: "manual",
@@ -241,7 +241,7 @@ async function main() {
       competencia: "2026-05",
       description: "Repasse parceiro (ajuste)",
       category: "Receita Extra",
-      amount: 250.00,
+      amount: 250,
       type: "income",
       ownership: "mine",
       source: "manual",
@@ -251,17 +251,17 @@ async function main() {
 
   // Parcelas Inter (04/2026 a 02/2027)
   const parcelasInter: { comp: string; amount: number }[] = [
-    { comp: "2026-04", amount: 950.00 },
-    { comp: "2026-05", amount: 600.0 },
-    { comp: "2026-06", amount: 600.0 },
-    { comp: "2026-07", amount: 220.00 },
-    { comp: "2026-08", amount: 220.00 },
-    { comp: "2026-09", amount: 120.00 },
-    { comp: "2026-10", amount: 80.00 },
-    { comp: "2026-11", amount: 50.00 },
-    { comp: "2026-12", amount: 50.00 },
-    { comp: "2027-01", amount: 50.00 },
-    { comp: "2027-02", amount: 50.00 },
+    { comp: "2026-04", amount: 950 },
+    { comp: "2026-05", amount: 600 },
+    { comp: "2026-06", amount: 600 },
+    { comp: "2026-07", amount: 220 },
+    { comp: "2026-08", amount: 220 },
+    { comp: "2026-09", amount: 120 },
+    { comp: "2026-10", amount: 80 },
+    { comp: "2026-11", amount: 50 },
+    { comp: "2026-12", amount: 50 },
+    { comp: "2027-01", amount: 50 },
+    { comp: "2027-02", amount: 50 },
   ];
 
   for (const p of parcelasInter) {
@@ -283,12 +283,12 @@ async function main() {
 
   // Recurring templates - despesas fixas conjuntas (a partir de 04/2026)
   const despesasFixas = [
-    { desc: "Aluguel", category: "Moradia", amount: 2800.00, day: 5 },
-    { desc: "Água", category: "Moradia", amount: 150.0, day: 10, isVariable: true },
-    { desc: "Luz", category: "Moradia", amount: 260.0, day: 15, isVariable: true },
-    { desc: "Internet", category: "Moradia", amount: 100.0, day: 10 },
-    { desc: "Dados Móveis", category: "Comunicação", amount: 90.0, day: 10 },
-    { desc: "Alimentação/Mercado", category: "Alimentação", amount: 950.0, day: 1 },
+    { desc: "Aluguel", category: "Moradia", amount: 2800, day: 5 },
+    { desc: "Água", category: "Moradia", amount: 150, day: 10, isVariable: true },
+    { desc: "Luz", category: "Moradia", amount: 260, day: 15, isVariable: true },
+    { desc: "Internet", category: "Moradia", amount: 100, day: 10 },
+    { desc: "Dados Móveis", category: "Comunicação", amount: 90, day: 10 },
+    { desc: "Alimentação/Mercado", category: "Alimentação", amount: 950, day: 1 },
   ];
 
   for (const d of despesasFixas) {
@@ -313,7 +313,7 @@ async function main() {
     data: {
       description: "Renda Líquida PJ - Usuário 1",
       category: "Salário",
-      amount: 8000.00,
+      amount: 8000,
       type: "income",
       ownership: "mine",
       dayOfMonth: 5,
@@ -327,7 +327,7 @@ async function main() {
     data: {
       description: "Renda Líquida CLT - Usuário 2",
       category: "Salário",
-      amount: 6800.0,
+      amount: 6800,
       type: "income",
       ownership: "partner",
       dayOfMonth: 5,
@@ -341,7 +341,7 @@ async function main() {
     data: {
       description: "Vale Alimentação - Usuário 2",
       category: "Benefício",
-      amount: 900.0,
+      amount: 900,
       type: "income",
       ownership: "partner",
       dayOfMonth: 5,
@@ -355,7 +355,7 @@ async function main() {
     data: {
       description: "13º Salário - Usuário 2",
       category: "Salário",
-      amount: 6800.0,
+      amount: 6800,
       type: "income",
       ownership: "partner",
       dayOfMonth: 20,

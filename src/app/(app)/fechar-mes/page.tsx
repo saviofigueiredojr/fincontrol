@@ -34,6 +34,10 @@ import {
   nextCompetencia,
   prevCompetencia,
 } from "@/lib/utils";
+import {
+  DEFAULT_GOAL_TARGET,
+  DEFAULT_MONTHLY_GOAL_SUGGESTION,
+} from "@/lib/app-defaults";
 
 interface CategorySummary {
   category: string;
@@ -108,9 +112,13 @@ function normalizeMonthData(monthPayload: any, txPayload: any, competencia: stri
     despesas,
     saldo,
     categorySummary: Array.from(categoryMap.values()).sort((a, b) => b.total - a.total),
-    goalSuggestion: toFiniteNumber(monthPayload?.goalSuggestion ?? monthPayload?.metaAllocation ?? 1200.00),
+    goalSuggestion: toFiniteNumber(
+      monthPayload?.goalSuggestion ??
+      monthPayload?.metaAllocation ??
+      DEFAULT_MONTHLY_GOAL_SUGGESTION
+    ),
     currentGoalAmount: toFiniteNumber(monthPayload?.currentGoalAmount ?? 0),
-    goalTarget: toFiniteNumber(monthPayload?.goalTarget ?? 30000),
+    goalTarget: toFiniteNumber(monthPayload?.goalTarget ?? DEFAULT_GOAL_TARGET),
     settleUp: monthPayload?.settleUp,
   };
 }
@@ -170,7 +178,7 @@ export default function FecharMesPage() {
       const txJson = txRes.ok ? await txRes.json() : [];
       const normalizedMonth = normalizeMonthData(mJson, txJson, competencia);
       setMonthData(normalizedMonth);
-      setAllocation(String(normalizedMonth.goalSuggestion || 1200.00));
+      setAllocation(String(normalizedMonth.goalSuggestion || DEFAULT_MONTHLY_GOAL_SUGGESTION));
 
       if (projRes.ok) {
         const pJson = await projRes.json();

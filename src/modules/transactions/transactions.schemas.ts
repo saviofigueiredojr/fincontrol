@@ -50,6 +50,7 @@ export const updateTransactionSchema = z
     isRecurring: z.boolean().optional(),
     recurringId: z.string().trim().min(1).nullable().optional(),
     isSecret: z.boolean().optional(),
+    applyToSeries: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided",

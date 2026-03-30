@@ -12,12 +12,11 @@ import {
   AlertCircle,
   Lock,
 } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -31,9 +30,17 @@ import {
   nextCompetencia,
   prevCompetencia,
 } from "@/lib/utils";
+import {
+  createFallbackHouseholdDisplayContext,
+  getOwnershipDisplayLabel,
+  getPartnerDisplayName,
+  getSelfDisplayName,
+  type HouseholdDisplayContext,
+} from "@/lib/household-display";
 
 interface Transaction {
   id: string;
+  userId: string;
   date: string;
   description: string;
   category: string;
@@ -41,6 +48,8 @@ interface Transaction {
   ownership: "mine" | "partner" | "joint";
   amount: number;
   isSecret?: boolean;
+  isRecurring?: boolean;
+  recurringId?: string | null;
   currentInstallment?: number;
   totalInstallments?: number;
 }
@@ -55,6 +64,7 @@ function normalizeTransactions(payload: any): Transaction[] {
 
   return payload.map((tx: any) => ({
     id: String(tx?.id ?? ""),
+    userId: String(tx?.userId ?? ""),
     date: String(tx?.date ?? new Date().toISOString()),
     description: String(tx?.description ?? ""),
     category: String(tx?.category ?? "Outros"),
@@ -63,6 +73,8 @@ function normalizeTransactions(payload: any): Transaction[] {
       tx?.ownership === "partner" ? "partner" : tx?.ownership === "joint" ? "joint" : "mine",
     amount: toFiniteNumber(tx?.amount),
     isSecret: !!tx?.isSecret,
+    isRecurring: !!tx?.isRecurring,
+    recurringId: typeof tx?.recurringId === "string" ? tx.recurringId : null,
     currentInstallment: tx?.currentInstallment ?? tx?.installmentCurrent ?? undefined,
     totalInstallments: tx?.totalInstallments ?? tx?.installmentTotal ?? undefined,
   }));
@@ -82,12 +94,6 @@ const CATEGORIES = [
   "Outros",
 ];
 
-const OWNERSHIP_LABELS: Record<string, string> = {
-  mine: "Meu",
-  partner: "Dele",
-  joint: "Conjunto",
-};
-
 const OWNERSHIP_BADGE_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
   mine: "default",
   partner: "secondary",
@@ -102,6 +108,8 @@ const emptyForm = {
   type: "expense" as "income" | "expense",
   ownership: "mine" as "mine" | "partner" | "joint",
   isSecret: false,
+  isRecurring: false,
+  recurringId: null as string | null,
   currentInstallment: "",
   totalInstallments: "",
 };
@@ -112,19 +120,20 @@ export default function LancamentosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [householdContext, setHouseholdContext] = useState<HouseholdDisplayContext>(
+    createFallbackHouseholdDisplayContext()
+  );
+  const [applyToSeries, setApplyToSeries] = useState(false);
 
-  // Filters
   const [ownershipFilter, setOwnershipFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
 
-  // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
 
-  // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -136,10 +145,32 @@ export default function LancamentosPage() {
       if (typeFilter !== "all") params.set("type", typeFilter);
       if (categoryFilter !== "all") params.set("category", categoryFilter);
       if (searchQuery) params.set("search", searchQuery);
-      const res = await fetch(`/api/transactions?${params}`);
-      if (!res.ok) throw new Error("Erro ao carregar lancamentos");
-      const json = await res.json();
-      setTransactions(normalizeTransactions(json.transactions ?? json));
+
+      const [transactionsRes, contextRes] = await Promise.all([
+        fetch(`/api/transactions?${params}`),
+        fetch("/api/household/context"),
+      ]);
+
+      if (!transactionsRes.ok) throw new Error("Erro ao carregar lancamentos");
+
+      const transactionsJson = await transactionsRes.json();
+      setTransactions(normalizeTransactions(transactionsJson.transactions ?? transactionsJson));
+
+      if (contextRes.ok) {
+        const contextJson = await contextRes.json();
+        setHouseholdContext({
+          self: {
+            id: String(contextJson?.self?.id ?? ""),
+            name: String(contextJson?.self?.name ?? ""),
+          },
+          partner: contextJson?.partner
+            ? {
+                id: String(contextJson.partner.id ?? ""),
+                name: String(contextJson.partner.name ?? ""),
+              }
+            : null,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -154,6 +185,7 @@ export default function LancamentosPage() {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setApplyToSeries(false);
     setModalOpen(true);
   };
 
@@ -167,9 +199,12 @@ export default function LancamentosPage() {
       type: tx.type,
       ownership: tx.ownership,
       isSecret: tx.isSecret ?? false,
+      isRecurring: tx.isRecurring ?? false,
+      recurringId: tx.recurringId ?? null,
       currentInstallment: tx.currentInstallment ? String(tx.currentInstallment) : "",
       totalInstallments: tx.totalInstallments ? String(tx.totalInstallments) : "",
     });
+    setApplyToSeries(Boolean(tx.isRecurring && tx.recurringId));
     setModalOpen(true);
   };
 
@@ -186,6 +221,7 @@ export default function LancamentosPage() {
         isSecret: form.isSecret,
         installmentCurrent: form.currentInstallment ? parseInt(form.currentInstallment, 10) : null,
         installmentTotal: form.totalInstallments ? parseInt(form.totalInstallments, 10) : null,
+        applyToSeries: editingId && form.isRecurring ? applyToSeries : undefined,
         competencia,
       };
 
@@ -217,11 +253,11 @@ export default function LancamentosPage() {
     }
   };
 
-  const filtered = transactions;
+  const selfDisplayName = getSelfDisplayName(householdContext);
+  const partnerDisplayName = getPartnerDisplayName(householdContext);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Lancamentos</h1>
         <div className="flex items-center gap-2">
@@ -237,11 +273,9 @@ export default function LancamentosPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-            {/* Search */}
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
@@ -253,28 +287,27 @@ export default function LancamentosPage() {
               />
             </div>
 
-            {/* Ownership filter */}
             <div className="flex rounded-md border overflow-hidden">
               {[
                 { value: "all", label: "Todos" },
-                { value: "mine", label: "Meus" },
-                { value: "partner", label: "Dele" },
+                { value: "mine", label: selfDisplayName },
+                { value: "partner", label: partnerDisplayName },
                 { value: "joint", label: "Conjuntos" },
               ].map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => setOwnershipFilter(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${ownershipFilter === opt.value
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    ownershipFilter === opt.value
                       ? "bg-primary text-primary-foreground"
                       : "bg-background hover:bg-muted"
-                    }`}
+                  }`}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
 
-            {/* Type filter */}
             <div className="flex rounded-md border overflow-hidden">
               {[
                 { value: "all", label: "Todos" },
@@ -284,17 +317,17 @@ export default function LancamentosPage() {
                 <button
                   key={opt.value}
                   onClick={() => setTypeFilter(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${typeFilter === opt.value
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    typeFilter === opt.value
                       ? "bg-primary text-primary-foreground"
                       : "bg-background hover:bg-muted"
-                    }`}
+                  }`}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
 
-            {/* Category filter */}
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
@@ -306,7 +339,6 @@ export default function LancamentosPage() {
               ))}
             </select>
 
-            {/* New button */}
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4 mr-1" /> Novo Lancamento
             </Button>
@@ -314,7 +346,6 @@ export default function LancamentosPage() {
         </CardContent>
       </Card>
 
-      {/* Table */}
       <Card>
         <CardContent className="pt-6">
           {loading ? (
@@ -342,19 +373,23 @@ export default function LancamentosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.length === 0 ? (
+                  {transactions.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-12 text-center text-muted-foreground">
                         Nenhum lancamento encontrado
                       </td>
                     </tr>
                   ) : (
-                    filtered.map((tx) => (
+                    transactions.map((tx) => (
                       <tr key={tx.id} className="border-b last:border-0 hover:bg-muted/50">
                         <td className="py-3 px-2 whitespace-nowrap">{formatDate(tx.date)}</td>
                         <td className="py-3 px-2">
                           <span className="flex items-center gap-1.5">
-                            {tx.isSecret && <span title="Secreto" className="flex"><Lock className="h-3.5 w-3.5 text-amber-500 shrink-0" /></span>}
+                            {tx.isSecret && (
+                              <span title="Secreto" className="flex">
+                                <Lock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                              </span>
+                            )}
                             {tx.description}
                             {tx.totalInstallments && (
                               <span className="text-xs text-muted-foreground ml-1">
@@ -371,10 +406,12 @@ export default function LancamentosPage() {
                         </td>
                         <td className="py-3 px-2 text-center">
                           <Badge variant={OWNERSHIP_BADGE_VARIANT[tx.ownership]}>
-                            {OWNERSHIP_LABELS[tx.ownership]}
+                            {getOwnershipDisplayLabel(tx.ownership, tx.userId, householdContext)}
                           </Badge>
                         </td>
-                        <td className={`py-3 px-2 text-right font-medium ${tx.type === "income" ? "text-green-600" : "text-red-600"}`}>
+                        <td className={`py-3 px-2 text-right font-medium ${
+                          tx.type === "income" ? "text-green-600" : "text-red-600"
+                        }`}>
                           {formatCurrency(tx.amount)}
                         </td>
                         <td className="py-3 px-2 text-right">
@@ -397,7 +434,6 @@ export default function LancamentosPage() {
         </CardContent>
       </Card>
 
-      {/* Create/Edit Modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -457,16 +493,18 @@ export default function LancamentosPage() {
                 <button
                   type="button"
                   onClick={() => setForm({ ...form, type: "expense" })}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${form.type === "expense" ? "bg-red-500 text-white" : "bg-background hover:bg-muted"
-                    }`}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                    form.type === "expense" ? "bg-red-500 text-white" : "bg-background hover:bg-muted"
+                  }`}
                 >
                   Despesa
                 </button>
                 <button
                   type="button"
                   onClick={() => setForm({ ...form, type: "income" })}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${form.type === "income" ? "bg-green-500 text-white" : "bg-background hover:bg-muted"
-                    }`}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                    form.type === "income" ? "bg-green-500 text-white" : "bg-background hover:bg-muted"
+                  }`}
                 >
                   Receita
                 </button>
@@ -477,11 +515,11 @@ export default function LancamentosPage() {
               <label className="text-sm font-medium mb-1 block">Titular</label>
               <select
                 value={form.ownership}
-                onChange={(e) => setForm({ ...form, ownership: e.target.value as any })}
+                onChange={(e) => setForm({ ...form, ownership: e.target.value as "mine" | "partner" | "joint" })}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               >
-                <option value="mine">Meu</option>
-                <option value="partner">Dele</option>
+                <option value="mine">{selfDisplayName}</option>
+                <option value="partner">{partnerDisplayName}</option>
                 <option value="joint">Conjunto</option>
               </select>
             </div>
@@ -500,9 +538,28 @@ export default function LancamentosPage() {
                 <span className="text-sm font-medium flex items-center gap-1.5">
                   <Lock className="h-3.5 w-3.5" /> Secreto
                 </span>
-                <p className="text-xs text-muted-foreground">Oculta este lancamento do(a) parceiro(a)</p>
+                <p className="text-xs text-muted-foreground">Oculta este lancamento do outro titular</p>
               </div>
             </div>
+
+            {editingId && form.isRecurring && (
+              <div className="rounded-lg border border-border/70 bg-muted/40 p-3">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={applyToSeries}
+                    onChange={(e) => setApplyToSeries(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-border"
+                  />
+                  <div>
+                    <p className="text-sm font-medium">Aplicar na serie recorrente</p>
+                    <p className="text-xs text-muted-foreground">
+                      Atualiza este lancamento e as proximas ocorrencias da mesma recorrencia.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -542,7 +599,6 @@ export default function LancamentosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Modal */}
       <Dialog open={!!deletingId} onOpenChange={() => setDeletingId(null)}>
         <DialogContent>
           <DialogHeader>

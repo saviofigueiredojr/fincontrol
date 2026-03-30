@@ -12,6 +12,103 @@ export interface TransactionActor {
   memberIds: string[];
 }
 
+function getPartnerUserId(actor: TransactionActor) {
+  return actor.memberIds.find((memberId) => memberId !== actor.userId) ?? actor.userId;
+}
+
+function resolveTransactionUserId(
+  actor: TransactionActor,
+  currentUserId: string,
+  ownership: UpdateTransactionInput["ownership"] | Transaction["ownership"]
+) {
+  if (ownership === "mine") {
+    return actor.userId;
+  }
+
+  if (ownership === "partner") {
+    return getPartnerUserId(actor);
+  }
+
+  return currentUserId;
+}
+
+function getDateForCompetencia(competencia: string, desiredDay: number) {
+  const [year, month] = competencia.split("-").map(Number);
+  const maxDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(desiredDay, maxDay);
+
+  return new Date(year, month - 1, safeDay);
+}
+
+function getRequestedDayOfMonth(input: UpdateTransactionInput) {
+  if (!input.date) {
+    return null;
+  }
+
+  const parsedDate = new Date(input.date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.getDate();
+}
+
+function buildTransactionUpdateData(
+  actor: TransactionActor,
+  currentUserId: string,
+  input: UpdateTransactionInput,
+  competenciaOverride?: string
+) {
+  const {
+    applyToSeries: _applyToSeries,
+    date,
+    competencia,
+    ownership,
+    ...rest
+  } = input;
+
+  const data: Record<string, unknown> = { ...rest };
+
+  if (ownership !== undefined) {
+    data.ownership = ownership;
+    data.userId = resolveTransactionUserId(actor, currentUserId, ownership);
+  }
+
+  if (!competenciaOverride && competencia !== undefined) {
+    data.competencia = competencia;
+  }
+
+  if (date) {
+    if (competenciaOverride) {
+      const desiredDay = getRequestedDayOfMonth(input);
+      if (desiredDay) {
+        data.date = getDateForCompetencia(competenciaOverride, desiredDay);
+      }
+    } else {
+      data.date = new Date(date);
+    }
+  }
+
+  return data;
+}
+
+function buildRecurringTemplateUpdateData(input: UpdateTransactionInput) {
+  const data: Record<string, unknown> = {};
+
+  if (input.description !== undefined) data.description = input.description;
+  if (input.category !== undefined) data.category = input.category;
+  if (input.amount !== undefined) data.amount = input.amount;
+  if (input.type !== undefined) data.type = input.type;
+  if (input.ownership !== undefined) data.ownership = input.ownership;
+
+  const desiredDay = getRequestedDayOfMonth(input);
+  if (desiredDay) {
+    data.dayOfMonth = desiredDay;
+  }
+
+  return data;
+}
+
 function buildSecretFilter(userId: string) {
   return {
     OR: [
@@ -169,14 +266,65 @@ export async function updateScopedTransaction(
     return { kind: "forbidden" as const };
   }
 
-  const data: Record<string, unknown> = { ...input };
-  if (data.date) {
-    data.date = new Date(data.date as string);
+  if (!input.applyToSeries || !existing.isRecurring || !existing.recurringId) {
+    const data = buildTransactionUpdateData(actor, existing.userId, input);
+
+    const updated = await prisma.transaction.update({
+      where: { id: transactionId },
+      data,
+    });
+
+    return { kind: "ok" as const, transaction: updated };
   }
 
-  const updated = await prisma.transaction.update({
-    where: { id: transactionId },
-    data,
+  const recurringId = existing.recurringId;
+
+  const updated = await prisma.$transaction(async (transactionClient) => {
+    const currentUpdateData = buildTransactionUpdateData(actor, existing.userId, input);
+
+    const currentTransaction = await transactionClient.transaction.update({
+      where: { id: transactionId },
+      data: currentUpdateData,
+    });
+
+    const futureTransactions = await transactionClient.transaction.findMany({
+      where: {
+        recurringId,
+        id: { not: transactionId },
+        userId: { in: actor.memberIds },
+        competencia: { gte: existing.competencia },
+      },
+      orderBy: { date: "asc" },
+      select: {
+        id: true,
+        competencia: true,
+        userId: true,
+      },
+    });
+
+    for (const futureTransaction of futureTransactions) {
+      const futureUpdateData = buildTransactionUpdateData(
+        actor,
+        futureTransaction.userId,
+        input,
+        futureTransaction.competencia
+      );
+
+      await transactionClient.transaction.update({
+        where: { id: futureTransaction.id },
+        data: futureUpdateData,
+      });
+    }
+
+    const templateUpdateData = buildRecurringTemplateUpdateData(input);
+    if (Object.keys(templateUpdateData).length > 0) {
+      await transactionClient.recurringTemplate.update({
+        where: { id: recurringId },
+        data: templateUpdateData,
+      });
+    }
+
+    return currentTransaction;
   });
 
   return { kind: "ok" as const, transaction: updated };
