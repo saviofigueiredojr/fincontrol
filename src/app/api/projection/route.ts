@@ -17,15 +17,23 @@ export async function GET(request: NextRequest) {
     const { householdId, memberIds } = await getHouseholdForUser(userId);
     const { searchParams } = new URL(request.url);
     const monthsParam = searchParams.get("months");
+    const startCompetencia = searchParams.get("competencia");
     const totalMonths = monthsParam ? Math.min(parseInt(monthsParam), 36) : 12;
 
     if (isNaN(totalMonths) || totalMonths < 1) {
       return NextResponse.json({ error: "months deve ser um número positivo" }, { status: 400 });
     }
 
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed
+    if (startCompetencia && !/^\d{4}-\d{2}$/.test(startCompetencia)) {
+      return NextResponse.json(
+        { error: "competencia deve estar no formato YYYY-MM" },
+        { status: 400 }
+      );
+    }
+
+    const [currentYear, currentMonth] = startCompetencia
+      ? startCompetencia.split("-").map(Number)
+      : [new Date().getFullYear(), new Date().getMonth() + 1];
 
     // Get active recurring templates (household scoped)
     const templates = await prisma.recurringTemplate.findMany({
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
     // Get all future installment transactions (household scoped)
     const futureCompetencias: string[] = [];
     for (let i = 0; i < totalMonths; i++) {
-      const d = new Date(currentYear, currentMonth + i, 1);
+      const d = new Date(currentYear, currentMonth - 1 + i, 1);
       futureCompetencias.push(
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
       );

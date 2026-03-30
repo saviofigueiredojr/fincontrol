@@ -48,6 +48,20 @@ export function prevCompetencia(comp: string): string {
   return `${year}-${String(month - 1).padStart(2, "0")}`;
 }
 
+export function shiftCompetencia(comp: string, offset: number): string {
+  const { year, month } = parseCompetencia(comp);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function normalizeCategoryKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 export function parseBRLCurrency(value: string): number {
   const cleaned = value
     .replace("R$", "")

@@ -13,8 +13,8 @@ import {
   Pie,
   Cell,
   Legend,
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
 } from "recharts";
 import {
   TrendingUp,
@@ -44,7 +44,7 @@ interface DashboardData {
   despesas: number;
   saldo: number;
   meta: { current: number; target: number; percentage: number; lifespan?: number };
-  chartData: { competencia: string; label: string; receitas: number; despesas: number }[];
+  chartData: { competencia: string; label: string; receitas: number; despesas: number; saldo: number }[];
   despesasPorCategoria: { name: string; value: number }[];
   parcelasAtivas: {
     id: string;
@@ -103,6 +103,7 @@ function normalizeDashboardData(payload: any): DashboardData {
         label,
         receitas: toFiniteNumber(item?.receitas ?? item?.income ?? item?.totalIncome),
         despesas: toFiniteNumber(item?.despesas ?? item?.expense ?? item?.totalExpense),
+        saldo: toFiniteNumber(item?.saldo ?? item?.balance),
       };
     })
     : [];
@@ -118,16 +119,20 @@ function normalizeDashboardData(payload: any): DashboardData {
     value: toFiniteNumber(item?.value ?? item?.amount ?? item?.total ?? item?.spent),
   }));
 
-  const parcelasAtivas = Array.isArray(payload?.parcelasAtivas)
-    ? payload.parcelasAtivas.map((item: any) => ({
+  const parcelasAtivasSource = Array.isArray(payload?.parcelasAtivas)
+    ? payload.parcelasAtivas
+    : Array.isArray(payload?.activeInstallments)
+      ? payload.activeInstallments
+      : [];
+
+  const parcelasAtivas = parcelasAtivasSource.map((item: any) => ({
       id: String(item?.id ?? `${item?.description ?? "parcela"}-${item?.nextDueDate ?? ""}`),
       description: String(item?.description ?? "Parcela"),
-      currentInstallment: toFiniteNumber(item?.currentInstallment),
-      totalInstallments: toFiniteNumber(item?.totalInstallments),
+      currentInstallment: toFiniteNumber(item?.currentInstallment ?? item?.installmentCurrent),
+      totalInstallments: toFiniteNumber(item?.totalInstallments ?? item?.installmentTotal),
       amount: toFiniteNumber(item?.amount),
       nextDueDate: String(item?.nextDueDate ?? new Date().toISOString()),
-    }))
-    : [];
+    }));
 
   const orcamentoSource = Array.isArray(payload?.orcamentoPorCategoria)
     ? payload.orcamentoPorCategoria
@@ -178,7 +183,7 @@ export default function DashboardPage() {
     try {
       const [resDash, resProj] = await Promise.all([
         fetch(`/api/dashboard?competencia=${competencia}`),
-        fetch(`/api/projection?months=6`)
+        fetch(`/api/projection?months=6&competencia=${competencia}`)
       ]);
 
       if (!resDash.ok) throw new Error("Erro ao carregar dados do dashboard");
@@ -190,8 +195,11 @@ export default function DashboardPage() {
         const jsonProj = await resProj.json();
         setProjectionData(
           jsonProj.map((p: any) => ({
-            ...p,
+            competencia: String(p?.competencia ?? ""),
             label: competenciaToLabel(p.competencia),
+            projectedIncome: toFiniteNumber(p?.projectedIncome),
+            projectedExpense: toFiniteNumber(p?.projectedExpense),
+            projectedBalance: toFiniteNumber(p?.projectedBalance),
           }))
         );
       }
@@ -487,13 +495,7 @@ export default function DashboardPage() {
         <CardContent>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={projectionData}>
-                <defs>
-                  <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <LineChart data={projectionData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -508,16 +510,35 @@ export default function DashboardPage() {
                   className="text-xs text-muted-foreground"
                 />
                 <Tooltip content={customTooltip} />
-                <Area
+                <Legend wrapperStyle={{ fontSize: "12px" }} />
+                <Line
+                  type="monotone"
+                  dataKey="projectedIncome"
+                  name="Faturamento"
+                  stroke="#0f766e"
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="projectedExpense"
+                  name="Gastos"
+                  stroke="#be123c"
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
                   type="monotone"
                   dataKey="projectedBalance"
-                  name="Saldo Projetado"
+                  name="Caixa"
                   stroke="#0ea5e9"
                   strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorBalance)"
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
                 />
-              </AreaChart>
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </CardContent>

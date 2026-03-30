@@ -74,12 +74,27 @@ export default function DivisaoPage() {
 
       if (!txRes.ok) throw new Error("Erro ao carregar lancamentos");
       const txJson = await txRes.json();
-      setTransactions(txJson.transactions ?? txJson);
+      const txList = txJson.transactions ?? txJson;
+      setTransactions(txList);
 
       if (settingsRes.ok) {
         const sJson = await settingsRes.json();
-        const myIncome = parseFloat(sJson.primary_income || String(DEFAULT_PRIMARY_INCOME));
-        const partnerBase = parseFloat(sJson.partner_income || String(DEFAULT_PARTNER_INCOME));
+        const myIncomeFallback = txList
+          .filter((tx: Transaction) => tx.type === "income" && tx.ownership === "mine")
+          .reduce((sum: number, tx: Transaction) => sum + Number(tx.amount || 0), 0);
+        const partnerIncomeFallback = txList
+          .filter((tx: Transaction) => tx.type === "income" && tx.ownership === "partner")
+          .reduce((sum: number, tx: Transaction) => sum + Number(tx.amount || 0), 0);
+
+        const myIncome = parseFloat(
+          sJson.primary_income ||
+            sJson.savio_income ||
+            (myIncomeFallback > 0 ? String(myIncomeFallback) : String(DEFAULT_PRIMARY_INCOME))
+        );
+        const partnerBase = parseFloat(
+          sJson.partner_income ||
+            (partnerIncomeFallback > 0 ? String(partnerIncomeFallback) : String(DEFAULT_PARTNER_INCOME))
+        );
         const partnerVa = parseFloat(sJson.partner_va || String(DEFAULT_PARTNER_BENEFIT));
         setSettings({ myIncome, partnerIncome: partnerBase + partnerVa });
       }
