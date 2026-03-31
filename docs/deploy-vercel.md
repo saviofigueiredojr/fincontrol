@@ -17,9 +17,11 @@ DATABASE_URL=
 DIRECT_URL=
 NEXTAUTH_SECRET=
 NEXTAUTH_URL=
+CRON_SECRET=
 ```
 
 `NEXTAUTH_URL` deve apontar para a URL final do projeto no Vercel.
+`CRON_SECRET` e opcional, mas recomendado se voce pretende usar `/api/cron/pj-retainers`.
 
 ## Supabase + Vercel
 
@@ -35,6 +37,7 @@ DATABASE_URL="postgresql://USER:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/p
 DIRECT_URL="postgresql://USER:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres?schema=public"
 NEXTAUTH_SECRET="um-secret-com-32-ou-mais-caracteres"
 NEXTAUTH_URL="https://seu-projeto.vercel.app"
+CRON_SECRET="um-secret-longo-para-proteger-a-rota-de-cron"
 ```
 
 Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando seu projeto nao tiver suporte a IPv6.
@@ -63,3 +66,4 @@ Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando
 - `NEXTAUTH_SECRET` forte
 - seed nunca rodado em producao
 - primeiros logins testados apos o deploy
+- se usar cron, `CRON_SECRET` configurado e enviado no header `Authorization`

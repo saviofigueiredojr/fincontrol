@@ -62,6 +62,24 @@ Owns credit card import flows:
 - scoped card ownership checks
 - statement reconciliation and total refresh
 
+### `src/modules/recurring`
+
+Recurring behavior is still exposed through `src/app/api/recurring`, but the flow is already treated as a domain concern:
+
+- recurring template lifecycle
+- occurrence materialization
+- optional credit-card statement linking
+- interval-based generation rules
+
+### `src/modules/cards`
+
+Card management is split between route handlers and shared helpers today:
+
+- card CRUD
+- linked statement discovery
+- installment summaries
+- safe deletion rules
+
 ## Infrastructure
 
 ### `src/lib/env.ts`
@@ -88,11 +106,10 @@ This repository is meant to be public, but the deployed app can remain private. 
 
 ## Next architectural moves
 
-The next natural modules to extract are:
+The next natural improvements are less about adding features and more about sharpening boundaries:
 
-1. `projection`
-2. `recurring`
-3. `settings`
-4. `credit-cards`
-
-That would complete the move from route-centric logic to domain-centric services.
+1. extract `projection` aggregation rules into a dedicated domain service
+2. extract `dashboard` aggregation into a dedicated read-model service
+3. formalize shared DTOs for API responses consumed by the frontend
+4. isolate card/statement orchestration into a single module instead of route + helper split
+5. add more integration coverage for import, recurring and month-close flows

@@ -115,6 +115,8 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:6543/postgres?pgbouncer=true&conne
 DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?schema=public"
 NEXTAUTH_SECRET="replace-with-a-32-plus-character-secret-value"
 NEXTAUTH_URL="http://localhost:3000"
+# Opcional, apenas para proteger /api/cron/pj-retainers
+CRON_SECRET="replace-with-a-long-random-secret"
 ```
 
 Uso recomendado com Supabase:
@@ -207,15 +209,29 @@ Ainda nao ha uma cobertura ampla de interface e integracao fim a fim.
 
 - `/api/auth/[...nextauth]`
 - `/api/transactions`
+- `/api/transactions/[id]`
 - `/api/cards`
+- `/api/cards/[id]`
+- `/api/cards/[id]/transactions`
+- `/api/cards/installments`
 - `/api/import`
 - `/api/dashboard`
 - `/api/months`
+- `/api/months/[competencia]/reopen`
 - `/api/goals`
 - `/api/settings`
 - `/api/recurring`
 - `/api/projection`
 - `/api/creditos`
+- `/api/creditos/[id]`
+- `/api/household/context`
+- `/api/cron/pj-retainers`
+
+Referencia detalhada de metodos, payloads e respostas:
+
+- [docs/api.md](./docs/api.md)
+- runtime: `/api`
+- especificacao OpenAPI: `/api/openapi`
 
 ## Estrutura resumida
 
