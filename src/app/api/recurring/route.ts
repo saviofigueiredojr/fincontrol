@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
@@ -159,9 +160,52 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Cartão selecionado não encontrado" }, { status: 404 });
     }
 
-    const template = await prisma.$transaction(async (db) => {
-      const createdTemplate = await db.recurringTemplate.create({
+    const transactionUserId = getTransactionUserId(ownership, userId, memberIds);
+    const lastCompetencia = endDate || shiftCompetencia(startDate, DEFAULT_GENERATION_HORIZON_MONTHS - 1);
+
+    const competencias: string[] = [];
+    let cursor = startDate;
+    while (cursor <= lastCompetencia) {
+      if (shouldCreateOccurrence(startDate, cursor, finalInterval, finalIntervalCount)) {
+        competencias.push(cursor);
+      }
+      cursor = shiftCompetencia(cursor, 1);
+    }
+
+    let statementIdsByCompetencia = new Map<string, string>();
+    if (selectedCard && competencias.length > 0) {
+      const statements = await Promise.all(
+        competencias.map((competencia) =>
+          getOrCreateCardStatement(prisma, selectedCard.id, competencia)
+        )
+      );
+
+      statementIdsByCompetencia = new Map(
+        statements.map((statement) => [statement.competencia, statement.id])
+      );
+    }
+
+    const recurringId = randomUUID();
+    const transactionRows = competencias.map((competencia) => ({
+      id: randomUUID(),
+      date: getDateForCompetencia(competencia, dayOfMonth),
+      competencia,
+      description,
+      category,
+      amount,
+      type,
+      ownership,
+      isRecurring: true,
+      recurringId,
+      source: "recurring",
+      userId: transactionUserId,
+      cardStatementId: statementIdsByCompetencia.get(competencia) ?? null,
+    }));
+
+    const [template] = await prisma.$transaction([
+      prisma.recurringTemplate.create({
         data: {
+          id: recurringId,
           description,
           category,
           amount,
@@ -176,47 +220,11 @@ export async function POST(request: NextRequest) {
           isActive: true,
           householdId,
         },
-      });
-
-      const transactionUserId = getTransactionUserId(ownership, userId, memberIds);
-      const lastCompetencia = endDate || shiftCompetencia(startDate, DEFAULT_GENERATION_HORIZON_MONTHS - 1);
-
-      const competencias: string[] = [];
-      let cursor = startDate;
-      while (cursor <= lastCompetencia) {
-        if (shouldCreateOccurrence(startDate, cursor, finalInterval, finalIntervalCount)) {
-          competencias.push(cursor);
-        }
-        cursor = shiftCompetencia(cursor, 1);
-      }
-
-      if (competencias.length > 0) {
-        for (const competencia of competencias) {
-          const statementId = selectedCard
-            ? (await getOrCreateCardStatement(db, selectedCard.id, competencia)).id
-            : null;
-
-          await db.transaction.create({
-            data: {
-              date: getDateForCompetencia(competencia, dayOfMonth),
-              competencia,
-              description,
-              category,
-              amount,
-              type,
-              ownership,
-              isRecurring: true,
-              recurringId: createdTemplate.id,
-              source: "recurring",
-              userId: transactionUserId,
-              cardStatementId: statementId,
-            },
-          });
-        }
-      }
-
-      return createdTemplate;
-    });
+      }),
+      ...(transactionRows.length > 0
+        ? [prisma.transaction.createMany({ data: transactionRows })]
+        : []),
+    ]);
 
     return NextResponse.json(template, { status: 201 });
   } catch (error) {
