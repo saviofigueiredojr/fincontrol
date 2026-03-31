@@ -115,7 +115,7 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:6543/postgres?pgbouncer=true&conne
 DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?schema=public"
 NEXTAUTH_SECRET="replace-with-a-32-plus-character-secret-value"
 NEXTAUTH_URL="http://localhost:3000"
-# Opcional, apenas para proteger /api/cron/pj-retainers
+# Necessário para habilitar /api/cron/pj-retainers com segurança
 CRON_SECRET="replace-with-a-long-random-secret"
 ```
 

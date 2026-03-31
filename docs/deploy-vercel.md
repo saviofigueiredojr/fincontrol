@@ -21,7 +21,7 @@ CRON_SECRET=
 ```
 
 `NEXTAUTH_URL` deve apontar para a URL final do projeto no Vercel.
-`CRON_SECRET` e opcional, mas recomendado se voce pretende usar `/api/cron/pj-retainers`.
+`CRON_SECRET` e necessario para habilitar `/api/cron/pj-retainers`. Sem ele, a rota falha fechada por seguranca.
 
 ## Supabase + Vercel
 

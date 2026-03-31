@@ -397,8 +397,8 @@ Generates PJ receipts from active retainers.
 
 Authentication:
 
-- public route from an HTTP perspective
-- protected by `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is configured
+- protected by `Authorization: Bearer <CRON_SECRET>`
+- if `CRON_SECRET` is missing, the route stays disabled and returns `503`
 
 Response shape:
 
