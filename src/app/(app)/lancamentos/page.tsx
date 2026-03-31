@@ -13,6 +13,9 @@ import {
   Lock,
   CreditCard,
   ChevronsUpDown,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -457,6 +460,20 @@ export default function LancamentosPage() {
   const selfDisplayName = getSelfDisplayName(householdContext);
   const partnerDisplayName = getPartnerDisplayName(householdContext);
   const displayRows = useMemo(() => buildDisplayRows(transactions), [transactions]);
+  const summary = useMemo(() => {
+    const receitas = transactions
+      .filter((transaction) => transaction.type === "income")
+      .reduce((sum, transaction) => sum + transaction.amount, 0);
+    const despesas = transactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+    return {
+      receitas,
+      despesas,
+      saldo: receitas - despesas,
+    };
+  }, [transactions]);
 
   const toggleStatement = (statementId: string) => {
     setExpandedStatementIds((current) =>
@@ -625,6 +642,54 @@ export default function LancamentosPage() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Card>
+          <CardContent className="flex items-center justify-between pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Receitas na visualização</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-700">
+                {formatCurrency(summary.receitas)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-emerald-100 p-2 text-emerald-700">
+              <TrendingUp className="h-4 w-4" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex items-center justify-between pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Despesas na visualização</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-700">
+                {formatCurrency(summary.despesas)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-rose-100 p-2 text-rose-700">
+              <TrendingDown className="h-4 w-4" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex items-center justify-between pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Saldo da visualização</p>
+              <p
+                className={`mt-1 text-2xl font-semibold ${
+                  summary.saldo >= 0 ? "text-emerald-700" : "text-rose-700"
+                }`}
+              >
+                {formatCurrency(summary.saldo)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-200 p-2 text-slate-700">
+              <Wallet className="h-4 w-4" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardContent className="pt-6">

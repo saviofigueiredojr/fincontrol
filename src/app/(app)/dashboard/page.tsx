@@ -247,6 +247,11 @@ export default function DashboardPage() {
 
   if (!data) return null;
 
+  const totalParcelasAtivas = data.parcelasAtivas.reduce(
+    (sum, parcela) => sum + parcela.amount,
+    0
+  );
+
   const customTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     return (
@@ -460,7 +465,15 @@ export default function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Parcelas Ativas</CardTitle>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle>Parcelas Ativas</CardTitle>
+            <div className="text-sm text-muted-foreground">
+              Total no mês:{" "}
+              <span className="font-semibold text-foreground">
+                {formatCurrency(totalParcelasAtivas)}
+              </span>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
