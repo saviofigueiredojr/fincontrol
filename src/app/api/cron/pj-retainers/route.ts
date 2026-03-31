@@ -6,8 +6,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
     try {
+        if (!process.env.CRON_SECRET) {
+            return NextResponse.json(
+                { error: "Cron route is disabled: CRON_SECRET is not configured" },
+                { status: 503 }
+            );
+        }
+
         const authHeader = request.headers.get("authorization");
-        if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+        if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
             return new NextResponse("Unauthorized", { status: 401 });
         }
 
