@@ -1,4 +1,5 @@
-import { Transaction } from "@prisma/client";
+import { randomUUID } from "crypto";
+import { Prisma, Transaction } from "@prisma/client";
 import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import {
@@ -201,104 +202,120 @@ export async function createTransactionWithInstallments(
   actor: Pick<TransactionActor, "userId" | "memberIds">,
   input: CreateTransactionInput
 ) {
-  return prisma.$transaction(async (transactionClient) => {
-    const parsedDate = new Date(input.date);
-    const ownerUserId =
-      input.ownership === "partner"
-        ? actor.memberIds.find((memberId) => memberId !== actor.userId) ?? actor.userId
-        : actor.userId;
-    const selectedCard = input.cardId
-      ? await getScopedCreditCard(transactionClient, input.cardId, actor.memberIds)
-      : null;
+  const parsedDate = new Date(input.date);
+  const ownerUserId =
+    input.ownership === "partner"
+      ? actor.memberIds.find((memberId) => memberId !== actor.userId) ?? actor.userId
+      : actor.userId;
+  const selectedCard = input.cardId
+    ? await getScopedCreditCard(prisma, input.cardId, actor.memberIds)
+    : null;
 
-    if (input.cardId && !selectedCard) {
-      throw new Error("Cartão selecionado não foi encontrado");
-    }
-    const mainStatementId =
-      selectedCard
-        ? (
-            await getOrCreateCardStatement(
-              transactionClient,
-              selectedCard.id,
-              input.competencia
-            )
-          ).id
-        : null;
+  if (input.cardId && !selectedCard) {
+    throw new Error("Cartão selecionado não foi encontrado");
+  }
 
-    const mainTransaction = await transactionClient.transaction.create({
-      data: {
-        date: parsedDate,
-        competencia: input.competencia,
-        description: input.description,
+  const mainTransactionId = randomUUID();
+  const transactionsToCreate: Array<{
+    id: string;
+    date: Date;
+    competencia: string;
+    description: string;
+    category: string;
+    amount: number;
+    type: CreateTransactionInput["type"];
+    ownership: CreateTransactionInput["ownership"];
+    installmentCurrent: number | null;
+    installmentTotal: number | null;
+    isSecret: boolean;
+    parentId?: string;
+    source?: string;
+    userId: string;
+    cardStatementId: string | null;
+  }> = [
+    {
+      id: mainTransactionId,
+      date: parsedDate,
+      competencia: input.competencia,
+      description: input.description,
+      category: input.category,
+      amount: input.amount,
+      type: input.type,
+      ownership: input.ownership,
+      installmentCurrent:
+        input.installmentTotal && input.installmentTotal > 1
+          ? 1
+          : input.installmentCurrent ?? null,
+      installmentTotal: input.installmentTotal ?? null,
+      isSecret: input.isSecret,
+      source: input.source,
+      userId: ownerUserId,
+      cardStatementId: null,
+    },
+  ];
+
+  if (input.installmentTotal && input.installmentTotal > 1) {
+    const [compYear, compMonth] = input.competencia.split("-").map(Number);
+
+    for (
+      let installmentIndex = 2;
+      installmentIndex <= input.installmentTotal;
+      installmentIndex += 1
+    ) {
+      const futureDate = new Date(parsedDate);
+      futureDate.setMonth(futureDate.getMonth() + (installmentIndex - 1));
+
+      const futureComp = new Date(compYear, compMonth - 1 + (installmentIndex - 1), 1);
+      const futureCompetencia = `${futureComp.getFullYear()}-${String(
+        futureComp.getMonth() + 1
+      ).padStart(2, "0")}`;
+
+      transactionsToCreate.push({
+        id: randomUUID(),
+        date: futureDate,
+        competencia: futureCompetencia,
+        description: `${input.description} (${installmentIndex}/${input.installmentTotal})`,
         category: input.category,
         amount: input.amount,
         type: input.type,
         ownership: input.ownership,
-        installmentCurrent:
-          input.installmentTotal && input.installmentTotal > 1
-            ? 1
-            : input.installmentCurrent ?? null,
-        installmentTotal: input.installmentTotal ?? null,
+        installmentCurrent: installmentIndex,
+        installmentTotal: input.installmentTotal,
         isSecret: input.isSecret,
+        parentId: mainTransactionId,
         source: input.source,
         userId: ownerUserId,
-        cardStatementId: mainStatementId,
-      },
-    });
-
-    const createdTransactions = [mainTransaction];
-
-    if (input.installmentTotal && input.installmentTotal > 1) {
-      const [compYear, compMonth] = input.competencia.split("-").map(Number);
-
-      for (
-        let installmentIndex = 2;
-        installmentIndex <= input.installmentTotal;
-        installmentIndex += 1
-      ) {
-        const futureDate = new Date(parsedDate);
-        futureDate.setMonth(futureDate.getMonth() + (installmentIndex - 1));
-
-        const futureComp = new Date(compYear, compMonth - 1 + (installmentIndex - 1), 1);
-        const futureCompetencia = `${futureComp.getFullYear()}-${String(
-          futureComp.getMonth() + 1
-        ).padStart(2, "0")}`;
-        const futureStatementId =
-          selectedCard
-            ? (
-                await getOrCreateCardStatement(
-                  transactionClient,
-                  selectedCard.id,
-                  futureCompetencia
-                )
-              ).id
-            : null;
-
-        const installment = await transactionClient.transaction.create({
-          data: {
-            date: futureDate,
-            competencia: futureCompetencia,
-            description: `${input.description} (${installmentIndex}/${input.installmentTotal})`,
-            category: input.category,
-            amount: input.amount,
-            type: input.type,
-            ownership: input.ownership,
-            installmentCurrent: installmentIndex,
-            installmentTotal: input.installmentTotal,
-            isSecret: input.isSecret,
-            parentId: mainTransaction.id,
-            source: input.source,
-            userId: ownerUserId,
-            cardStatementId: futureStatementId,
-          },
-        });
-
-        createdTransactions.push(installment);
-      }
+        cardStatementId: null,
+      });
     }
+  }
 
-    return createdTransactions;
-  });
+  if (selectedCard) {
+    const competencias = Array.from(
+      new Set(transactionsToCreate.map((transaction) => transaction.competencia))
+    );
+    const statements = await Promise.all(
+      competencias.map((competencia) =>
+        getOrCreateCardStatement(prisma, selectedCard.id, competencia)
+      )
+    );
+    const statementIdsByCompetencia = new Map(
+      statements.map((statement) => [statement.competencia, statement.id])
+    );
+
+    for (const transaction of transactionsToCreate) {
+      transaction.cardStatementId =
+        statementIdsByCompetencia.get(transaction.competencia) ?? null;
+    }
+  }
+
+  return prisma.$transaction(
+    transactionsToCreate.map((transaction) =>
+      prisma.transaction.create({
+        data: transaction,
+      })
+    )
+  );
 }
 
 async function getScopedTransaction(actor: TransactionActor, transactionId: string) {
@@ -368,84 +385,107 @@ export async function updateScopedTransaction(
   }
 
   const recurringId = existing.recurringId;
+  const futureTransactions = await prisma.transaction.findMany({
+    where: {
+      recurringId,
+      id: { not: transactionId },
+      userId: { in: actor.memberIds },
+      competencia: { gte: existing.competencia },
+    },
+    orderBy: { date: "asc" },
+    select: {
+      id: true,
+      competencia: true,
+      userId: true,
+    },
+  });
 
-  const updated = await prisma.$transaction(async (transactionClient) => {
-    const currentUpdateData = buildTransactionUpdateData(actor, existing.userId, input);
-    const currentCompetencia =
-      typeof currentUpdateData.competencia === "string"
-        ? currentUpdateData.competencia
-        : existing.competencia;
-    const requestedCardId =
-      input.cardId !== undefined ? input.cardId : existing.cardStatement?.cardId;
+  const currentUpdateData = buildTransactionUpdateData(actor, existing.userId, input);
+  const currentCompetencia =
+    typeof currentUpdateData.competencia === "string"
+      ? currentUpdateData.competencia
+      : existing.competencia;
+  const requestedCardId =
+    input.cardId !== undefined ? input.cardId : existing.cardStatement?.cardId;
+  const resolvedCardId = selectedCard?.id ?? requestedCardId ?? null;
 
-    if (input.cardId !== undefined || (requestedCardId && input.competencia !== undefined)) {
-      currentUpdateData.cardStatementId = requestedCardId
-        ? (
-            await getOrCreateCardStatement(
-              transactionClient,
-              selectedCard?.id ?? requestedCardId,
-              currentCompetencia
-            )
-          ).id
+  const needsCurrentStatement =
+    input.cardId !== undefined || (requestedCardId && input.competencia !== undefined);
+  const needsFutureStatements = input.cardId !== undefined || Boolean(requestedCardId);
+
+  const statementIdsByCompetencia = new Map<string, string>();
+  if (resolvedCardId) {
+    const statementCompetencias = new Set<string>();
+
+    if (needsCurrentStatement) {
+      statementCompetencias.add(currentCompetencia);
+    }
+
+    if (needsFutureStatements) {
+      for (const futureTransaction of futureTransactions) {
+        statementCompetencias.add(futureTransaction.competencia);
+      }
+    }
+
+    if (statementCompetencias.size > 0) {
+      const statements = await Promise.all(
+        Array.from(statementCompetencias).map((competencia) =>
+          getOrCreateCardStatement(prisma, resolvedCardId, competencia)
+        )
+      );
+
+      for (const statement of statements) {
+        statementIdsByCompetencia.set(statement.competencia, statement.id);
+      }
+    }
+  }
+
+  if (needsCurrentStatement) {
+    currentUpdateData.cardStatementId = resolvedCardId
+      ? statementIdsByCompetencia.get(currentCompetencia) ?? null
+      : null;
+  }
+
+  const operations: Prisma.PrismaPromise<unknown>[] = [
+    prisma.transaction.update({
+      where: { id: transactionId },
+      data: currentUpdateData,
+    }),
+  ];
+
+  for (const futureTransaction of futureTransactions) {
+    const futureUpdateData = buildTransactionUpdateData(
+      actor,
+      futureTransaction.userId,
+      input,
+      futureTransaction.competencia
+    );
+
+    if (needsFutureStatements) {
+      futureUpdateData.cardStatementId = resolvedCardId
+        ? statementIdsByCompetencia.get(futureTransaction.competencia) ?? null
         : null;
     }
 
-    const currentTransaction = await transactionClient.transaction.update({
-      where: { id: transactionId },
-      data: currentUpdateData,
-    });
-
-    const futureTransactions = await transactionClient.transaction.findMany({
-      where: {
-        recurringId,
-        id: { not: transactionId },
-        userId: { in: actor.memberIds },
-        competencia: { gte: existing.competencia },
-      },
-      orderBy: { date: "asc" },
-      select: {
-        id: true,
-        competencia: true,
-        userId: true,
-      },
-    });
-
-    for (const futureTransaction of futureTransactions) {
-      const futureUpdateData = buildTransactionUpdateData(
-        actor,
-        futureTransaction.userId,
-        input,
-        futureTransaction.competencia
-      );
-
-      if (input.cardId !== undefined || requestedCardId) {
-        futureUpdateData.cardStatementId = requestedCardId
-          ? (
-              await getOrCreateCardStatement(
-                transactionClient,
-                selectedCard?.id ?? requestedCardId,
-                futureTransaction.competencia
-              )
-            ).id
-          : null;
-      }
-
-      await transactionClient.transaction.update({
+    operations.push(
+      prisma.transaction.update({
         where: { id: futureTransaction.id },
         data: futureUpdateData,
-      });
-    }
+      })
+    );
+  }
 
-    const templateUpdateData = buildRecurringTemplateUpdateData(input);
-    if (Object.keys(templateUpdateData).length > 0) {
-      await transactionClient.recurringTemplate.update({
+  const templateUpdateData = buildRecurringTemplateUpdateData(input);
+  if (Object.keys(templateUpdateData).length > 0) {
+    operations.push(
+      prisma.recurringTemplate.update({
         where: { id: recurringId },
         data: templateUpdateData,
-      });
-    }
+      })
+    );
+  }
 
-    return currentTransaction;
-  });
+  const [updated] = await prisma.$transaction(operations);
 
   return { kind: "ok" as const, transaction: updated };
 }
@@ -465,30 +505,30 @@ export async function deleteScopedTransaction(
     return { kind: "forbidden" as const };
   }
 
-  await prisma.$transaction(async (transactionClient) => {
-    if (scope === "series" && existing.isRecurring && existing.recurringId) {
-      await transactionClient.transaction.deleteMany({
+  if (scope === "series" && existing.isRecurring && existing.recurringId) {
+    await prisma.$transaction([
+      prisma.transaction.deleteMany({
         where: {
           recurringId: existing.recurringId,
           userId: { in: actor.memberIds },
         },
-      });
-
-      await transactionClient.recurringTemplate.deleteMany({
+      }),
+      prisma.recurringTemplate.deleteMany({
         where: { id: existing.recurringId },
-      });
+      }),
+    ]);
 
-      return;
-    }
+    return { kind: "ok" as const };
+  }
 
-    await transactionClient.transaction.deleteMany({
+  await prisma.$transaction([
+    prisma.transaction.deleteMany({
       where: { parentId: transactionId },
-    });
-
-    await transactionClient.transaction.delete({
+    }),
+    prisma.transaction.delete({
       where: { id: transactionId },
-    });
-  });
+    }),
+  ]);
 
   return { kind: "ok" as const };
 }
