@@ -1,61 +1,15 @@
-import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
-import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
-import { shiftCompetencia } from "@/lib/utils";
+import { createRecurringSchema } from "@/modules/recurring/recurring.schemas";
+import { createRecurringTemplate } from "@/modules/recurring/recurring.service";
 
 export const dynamic = "force-dynamic";
-const DEFAULT_GENERATION_HORIZON_MONTHS = 24;
 
-function getPartnerUserId(memberIds: string[], currentUserId: string) {
-  return memberIds.find((memberId) => memberId !== currentUserId) ?? currentUserId;
-}
-
-function getTransactionUserId(
-  ownership: string,
-  currentUserId: string,
-  memberIds: string[]
-) {
-  if (ownership === "mine") {
-    return currentUserId;
-  }
-
-  if (ownership === "partner") {
-    return getPartnerUserId(memberIds, currentUserId);
-  }
-
-  return currentUserId;
-}
-
-function getDateForCompetencia(competencia: string, desiredDay: number) {
-  const [year, month] = competencia.split("-").map(Number);
-  const maxDay = new Date(year, month, 0).getDate();
-  const safeDay = Math.min(Math.max(desiredDay, 1), maxDay);
-  return new Date(year, month - 1, safeDay);
-}
-
-function shouldCreateOccurrence(
-  startDate: string,
-  competencia: string,
-  interval: string,
-  intervalCount: number
-) {
-  const [startYear, startMonth] = startDate.split("-").map(Number);
-  const [currentYear, currentMonth] = competencia.split("-").map(Number);
-  const monthsDiff = (currentYear - startYear) * 12 + (currentMonth - startMonth);
-
-  if (monthsDiff < 0) {
-    return false;
-  }
-
-  if (interval === "yearly") {
-    return monthsDiff % (12 * intervalCount) === 0;
-  }
-
-  return monthsDiff % intervalCount === 0;
+function getValidationMessage(error: { issues?: Array<{ message?: string }> }) {
+  return error.issues?.[0]?.message ?? "Payload inválido";
 }
 
 export async function GET() {
@@ -94,137 +48,33 @@ export async function POST(request: NextRequest) {
     const { householdId, memberIds } = await getHouseholdForUser(userId);
 
     const body = await request.json();
-    const {
-      description, category, amount, type, ownership,
-      dayOfMonth, startDate, endDate,
-      interval, intervalCount, isVariable
-    } = body;
-    const cardId = typeof body.cardId === "string" && body.cardId.trim().length > 0
-      ? body.cardId.trim()
-      : null;
+    const parsedBody = createRecurringSchema.safeParse({
+      ...body,
+      cardId:
+        typeof body.cardId === "string" && body.cardId.trim().length > 0
+          ? body.cardId.trim()
+          : null,
+      endDate:
+        typeof body.endDate === "string" && body.endDate.trim().length > 0
+          ? body.endDate.trim()
+          : null,
+    });
 
-    if (!description || !category || !amount || !type || !ownership || !dayOfMonth || !startDate) {
+    if (!parsedBody.success) {
       return NextResponse.json(
-        { error: "Campos obrigatórios: description, category, amount, type, ownership, dayOfMonth, startDate" },
+        { error: getValidationMessage(parsedBody.error) },
         { status: 400 }
       );
     }
 
-    if (!["income", "expense"].includes(type)) {
-      return NextResponse.json({ error: "type deve ser income ou expense" }, { status: 400 });
-    }
-
-    if (!["mine", "partner", "joint"].includes(ownership)) {
-      return NextResponse.json({ error: "ownership deve ser mine, partner ou joint" }, { status: 400 });
-    }
-
-    if (typeof dayOfMonth !== "number" || dayOfMonth < 1 || dayOfMonth > 31) {
-      return NextResponse.json({ error: "dayOfMonth deve ser entre 1 e 31" }, { status: 400 });
-    }
-
-    if (typeof amount !== "number" || amount <= 0) {
-      return NextResponse.json({ error: "amount deve ser um número positivo" }, { status: 400 });
-    }
-
-    if (cardId && type !== "expense") {
-      return NextResponse.json(
-        { error: "Somente despesas podem ser vinculadas a cartão de crédito" },
-        { status: 400 }
-      );
-    }
-
-    if (!/^\d{4}-\d{2}$/.test(startDate)) {
-      return NextResponse.json({ error: "startDate deve ser YYYY-MM" }, { status: 400 });
-    }
-
-    if (endDate && !/^\d{4}-\d{2}$/.test(endDate)) {
-      return NextResponse.json({ error: "endDate deve ser YYYY-MM" }, { status: 400 });
-    }
-
-    const finalInterval = interval || "monthly";
-    if (!["monthly", "yearly"].includes(finalInterval)) {
-      return NextResponse.json({ error: "interval deve ser monthly ou yearly" }, { status: 400 });
-    }
-
-    const finalIntervalCount = typeof intervalCount === "number" ? intervalCount : 1;
-    if (finalIntervalCount < 1) {
-      return NextResponse.json({ error: "intervalCount deve ser maior ou igual a 1" }, { status: 400 });
-    }
-
-    const finalIsVariable = typeof isVariable === "boolean" ? isVariable : false;
-    const selectedCard = cardId
-      ? await getScopedCreditCard(prisma, cardId, memberIds)
-      : null;
-
-    if (cardId && !selectedCard) {
-      return NextResponse.json({ error: "Cartão selecionado não encontrado" }, { status: 404 });
-    }
-
-    const transactionUserId = getTransactionUserId(ownership, userId, memberIds);
-    const lastCompetencia = endDate || shiftCompetencia(startDate, DEFAULT_GENERATION_HORIZON_MONTHS - 1);
-
-    const competencias: string[] = [];
-    let cursor = startDate;
-    while (cursor <= lastCompetencia) {
-      if (shouldCreateOccurrence(startDate, cursor, finalInterval, finalIntervalCount)) {
-        competencias.push(cursor);
-      }
-      cursor = shiftCompetencia(cursor, 1);
-    }
-
-    let statementIdsByCompetencia = new Map<string, string>();
-    if (selectedCard && competencias.length > 0) {
-      const statements = await Promise.all(
-        competencias.map((competencia) =>
-          getOrCreateCardStatement(prisma, selectedCard.id, competencia)
-        )
-      );
-
-      statementIdsByCompetencia = new Map(
-        statements.map((statement) => [statement.competencia, statement.id])
-      );
-    }
-
-    const recurringId = randomUUID();
-    const transactionRows = competencias.map((competencia) => ({
-      id: randomUUID(),
-      date: getDateForCompetencia(competencia, dayOfMonth),
-      competencia,
-      description,
-      category,
-      amount,
-      type,
-      ownership,
-      isRecurring: true,
-      recurringId,
-      source: "recurring",
-      userId: transactionUserId,
-      cardStatementId: statementIdsByCompetencia.get(competencia) ?? null,
-    }));
-
-    const [template] = await prisma.$transaction([
-      prisma.recurringTemplate.create({
-        data: {
-          id: recurringId,
-          description,
-          category,
-          amount,
-          type,
-          ownership,
-          dayOfMonth,
-          startDate,
-          endDate: endDate || null,
-          interval: finalInterval,
-          intervalCount: finalIntervalCount,
-          isVariable: finalIsVariable,
-          isActive: true,
-          householdId,
-        },
-      }),
-      ...(transactionRows.length > 0
-        ? [prisma.transaction.createMany({ data: transactionRows })]
-        : []),
-    ]);
+    const template = await createRecurringTemplate(
+      {
+        userId,
+        householdId,
+        memberIds,
+      },
+      parsedBody.data
+    );
 
     return NextResponse.json(template, { status: 201 });
   } catch (error) {
