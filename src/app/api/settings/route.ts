@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/prisma";
 import { getHouseholdForUser } from "@/lib/household";
+import { isSensitiveSettingKey } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,9 @@ export async function GET() {
 
     const result: Record<string, string> = {};
     for (const s of settings) {
+      if (isSensitiveSettingKey(s.key)) {
+        continue;
+      }
       result[s.key] = s.value;
     }
 

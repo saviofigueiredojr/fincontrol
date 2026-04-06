@@ -13,6 +13,11 @@ const envSchema = z.object({
     .min(32, "NEXTAUTH_SECRET must be at least 32 characters"),
   NEXTAUTH_URL: z.string().url("NEXTAUTH_URL must be a valid URL"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string().min(16).optional(),
+  TELEGRAM_ALLOWED_CHAT_IDS: z.string().min(1).optional(),
+  TELEGRAM_CHAT_OWNERSHIP_MAP: z.string().min(1).optional(),
+  TELEGRAM_ACTOR_EMAIL: z.string().email().optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -20,6 +25,11 @@ const parsedEnv = envSchema.safeParse({
   NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
   NEXTAUTH_URL: process.env.NEXTAUTH_URL,
   NODE_ENV: process.env.NODE_ENV,
+  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+  TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+  TELEGRAM_ALLOWED_CHAT_IDS: process.env.TELEGRAM_ALLOWED_CHAT_IDS,
+  TELEGRAM_CHAT_OWNERSHIP_MAP: process.env.TELEGRAM_CHAT_OWNERSHIP_MAP,
+  TELEGRAM_ACTOR_EMAIL: process.env.TELEGRAM_ACTOR_EMAIL,
 });
 
 if (!parsedEnv.success) {

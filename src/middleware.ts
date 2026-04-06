@@ -10,10 +10,11 @@ export const config = {
      * Protege TUDO exceto:
      * - /login
      * - /api/auth (NextAuth)
+     * - /api/telegram/webhook (Telegram Bot API)
      * - /_next/static, /_next/image (assets do Next.js)
      * - /favicon.ico
      * - Arquivos com extensão (fonts, imagens, scripts estáticos, etc.)
      */
-    "/((?!login|api/auth|_next/static|_next/image|favicon\\.ico|.*\\..*).*)",
+    "/((?!login|api/auth|api/telegram/webhook|_next/static|_next/image|favicon\\.ico|.*\\..*).*)",
   ],
 };
