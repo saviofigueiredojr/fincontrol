@@ -26,6 +26,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - Marcacao de transacoes secretas
 - Importacao de faturas por CSV do Inter e OFX
 - Controle de parcelas ativas
+- Bot opcional no Telegram para lancamentos por comando
 - Divisao de despesas em modo `50/50`, proporcional ou personalizado
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes
@@ -117,6 +118,13 @@ NEXTAUTH_SECRET="replace-with-a-32-plus-character-secret-value"
 NEXTAUTH_URL="http://localhost:3000"
 # Necessário para habilitar /api/cron/pj-retainers com segurança
 CRON_SECRET="replace-with-a-long-random-secret"
+
+# Opcional: bot do Telegram
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_WEBHOOK_SECRET=""
+TELEGRAM_ALLOWED_CHAT_IDS=""
+TELEGRAM_CHAT_OWNERSHIP_MAP=""
+TELEGRAM_ACTOR_EMAIL=""
 ```
 
 Uso recomendado com Supabase:
@@ -182,6 +190,7 @@ O terceiro usuario fica em outro `household` e serve para validar isolamento de 
 - `npm run db:seed`: popula o banco com dados de exemplo
 - `npm run db:studio`: abre o Prisma Studio
 - `npm run ci`: roda o conjunto minimo usado na CI
+- `npm run telegram:sync`: registra comandos e webhook do bot do Telegram
 
 ## Testes
 
@@ -225,6 +234,7 @@ Ainda nao ha uma cobertura ampla de interface e integracao fim a fim.
 - `/api/creditos`
 - `/api/creditos/[id]`
 - `/api/household/context`
+- `/api/telegram/webhook`
 - `/api/cron/pj-retainers`
 
 Referencia detalhada de metodos, payloads e respostas:

@@ -23,6 +23,36 @@ NextAuth credential flow and session endpoints.
 - Public route
 - Used by the login screen and session management
 
+## Telegram bot
+
+### `POST /api/telegram/webhook`
+
+Receives Telegram Bot API updates.
+
+- Public route, but protected by the `x-telegram-bot-api-secret-token` header
+- Does not use NextAuth session
+- Processes command-driven flows for:
+  - `/gasto`
+  - `/receita`
+  - `/recorrente`
+  - `/cartoes`
+  - `/whoami`
+
+Configuration sources:
+
+- Environment variables:
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_WEBHOOK_SECRET`
+  - `TELEGRAM_ALLOWED_CHAT_IDS`
+  - `TELEGRAM_CHAT_OWNERSHIP_MAP`
+  - `TELEGRAM_ACTOR_EMAIL`
+- Or household settings with the same keys, stored server-side
+
+Notes:
+
+- `GET /api/settings` intentionally omits these Telegram keys because they are treated as sensitive configuration
+- If a chat is not authorized, the bot only returns pairing/help information and will not create transactions
+
 ## Household context
 
 ### `GET /api/household/context`

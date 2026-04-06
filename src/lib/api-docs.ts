@@ -80,6 +80,43 @@ export const apiDocs: ApiEndpointDoc[] = [
     ],
   },
   {
+    path: "/api/telegram/webhook",
+    tag: "Telegram",
+    auth: "public",
+    description:
+      "Webhook do bot do Telegram. Não usa sessão web; a autenticação ocorre pelo header secreto configurado no setWebhook.",
+    methods: [
+      {
+        method: "POST",
+        summary: "Receber mensagens do bot",
+        description:
+          "Processa comandos como /gasto, /receita, /recorrente, /cartoes e /whoami.",
+        requestBody: {
+          required: true,
+          description: "Payload padrão do Telegram Bot API para updates de mensagem.",
+          schema: {
+            type: "object",
+            properties: {
+              update_id: { type: "integer" },
+              message: {
+                type: "object",
+                properties: {
+                  message_id: { type: "integer" },
+                  text: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": "Update processado ou ignorado.",
+          "401": "Secret token do webhook inválido.",
+          "503": "Integração Telegram ainda não configurada.",
+        },
+      },
+    ],
+  },
+  {
     path: "/api/household/context",
     tag: "Household",
     auth: "session",
