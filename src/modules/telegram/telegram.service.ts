@@ -27,6 +27,20 @@ const KNOWN_CATEGORIES = [
   "Outros",
 ];
 
+const EXPENSE_CATEGORIES = [
+  "Moradia",
+  "Alimentação",
+  "Transporte",
+  "Lazer",
+  "Saúde",
+  "Educação",
+  "Comunicação",
+  "Cartão de Crédito",
+  "Outros",
+];
+
+const INCOME_CATEGORIES = ["Salário", "Benefício", "Receita Extra", "Outros"];
+
 const OWNERSHIP_ALIASES: Record<string, "mine" | "partner" | "joint"> = {
   mine: "mine",
   meu: "mine",
@@ -88,6 +102,7 @@ interface TelegramRuntimeConfig {
   chatOwnershipMap: Map<string, "mine" | "partner" | "joint">;
   actorUserId: string;
   actorName: string;
+  partnerName: string | null;
   householdId: string;
   memberIds: string[];
 }
@@ -121,7 +136,40 @@ interface TelegramPendingPresetState {
   presetId: string;
 }
 
-type TelegramPendingState = TelegramPendingPresetState;
+interface TelegramRecurringDraft {
+  type?: "income" | "expense";
+  category?: string;
+  description?: string;
+  amount?: number;
+  ownership?: "mine" | "partner" | "joint";
+  dayOfMonth?: number;
+  startDate?: string;
+  endDate?: string | null;
+  cardId?: string | null;
+  cardLabel?: string | null;
+}
+
+type TelegramRecurringWizardStep =
+  | "type"
+  | "category"
+  | "custom_category"
+  | "description"
+  | "amount"
+  | "ownership"
+  | "day"
+  | "start_date"
+  | "end_date_choice"
+  | "end_date_value"
+  | "card"
+  | "confirm";
+
+interface TelegramPendingRecurringState {
+  kind: "recurring_wizard";
+  step: TelegramRecurringWizardStep;
+  draft: TelegramRecurringDraft;
+}
+
+type TelegramPendingState = TelegramPendingPresetState | TelegramPendingRecurringState;
 
 const TELEGRAM_CHAT_STATE_PREFIX = "telegram_chat_state:";
 const MAIN_MENU_LABELS = {
@@ -131,6 +179,16 @@ const MAIN_MENU_LABELS = {
   cards: "Cartões",
   help: "Ajuda",
   cancel: "Cancelar",
+} as const;
+
+const RECURRING_MENU_LABELS = {
+  expense: "Gasto recorrente",
+  income: "Receita recorrente",
+  customCategory: "Outra categoria",
+  noEndDate: "Sem data final",
+  customEndDate: "Informar data final",
+  noCard: "Sem cartão",
+  confirm: "Confirmar",
 } as const;
 
 type ParsedCommand =
@@ -223,6 +281,39 @@ function buildCancelKeyboard(placeholder = "Envie o valor ou toque em Cancelar")
     one_time_keyboard: true,
     input_field_placeholder: placeholder,
   };
+}
+
+function buildChoiceKeyboard(
+  labels: string[],
+  options?: {
+    columns?: number;
+    placeholder?: string;
+  }
+): TelegramReplyKeyboardMarkup {
+  const columns = options?.columns ?? 2;
+  const rows: TelegramReplyKeyboardMarkup["keyboard"] = [];
+
+  for (let index = 0; index < labels.length; index += columns) {
+    rows.push(labels.slice(index, index + columns).map((label) => button(label)));
+  }
+
+  rows.push([button(MAIN_MENU_LABELS.cancel)]);
+
+  return {
+    keyboard: rows,
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    input_field_placeholder: options?.placeholder ?? "Escolha uma opção",
+  };
+}
+
+function buildRecurringTypeKeyboard() {
+  return buildChoiceKeyboard(
+    [RECURRING_MENU_LABELS.expense, RECURRING_MENU_LABELS.income],
+    {
+      placeholder: "Escolha o tipo da recorrência",
+    }
+  );
 }
 
 function getExpensePresets(): TelegramPresetDefinition[] {
@@ -340,6 +431,61 @@ function getPresetByLabel(actorName: string, label: string) {
   );
 }
 
+function getRecurringCategories(type: "income" | "expense") {
+  return type === "expense" ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+}
+
+function getCardChoiceLabel(card: { name: string; bank: string }) {
+  return `${card.name} (${card.bank})`;
+}
+
+function parseDayOfMonth(rawValue: string) {
+  const day = Number(rawValue.trim());
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : null;
+}
+
+function isCompetenciaValue(rawValue: string) {
+  return /^\d{4}-\d{2}$/.test(rawValue.trim());
+}
+
+function formatOwnershipLabel(
+  ownership: "mine" | "partner" | "joint",
+  selfName: string,
+  partnerName: string | null
+) {
+  if (ownership === "mine") {
+    return selfName;
+  }
+
+  if (ownership === "partner") {
+    return partnerName ?? "Parceiro";
+  }
+
+  return "Conjunto";
+}
+
+function resolveOwnershipFromInput(
+  rawValue: string,
+  selfName: string,
+  partnerName: string | null
+) {
+  const normalized = normalizeCategoryKey(rawValue);
+
+  if (normalized === normalizeCategoryKey(selfName)) {
+    return "mine" as const;
+  }
+
+  if (partnerName && normalized === normalizeCategoryKey(partnerName)) {
+    return "partner" as const;
+  }
+
+  if (normalized === normalizeCategoryKey("Conjunto")) {
+    return "joint" as const;
+  }
+
+  return normalizeOwnership(rawValue);
+}
+
 function buildPresetKeyboard(
   actorName: string,
   type: "expense" | "income"
@@ -363,6 +509,51 @@ function buildPresetKeyboard(
     input_field_placeholder:
       type === "expense" ? "Escolha um gasto rápido" : "Escolha uma receita rápida",
   };
+}
+
+function buildRecurringCategoryKeyboard(type: "income" | "expense") {
+  return buildChoiceKeyboard(
+    [...getRecurringCategories(type), RECURRING_MENU_LABELS.customCategory],
+    {
+      placeholder: "Escolha a categoria",
+    }
+  );
+}
+
+function buildRecurringOwnershipKeyboard(selfName: string, partnerName: string | null) {
+  return buildChoiceKeyboard(
+    [selfName, partnerName ?? "Parceiro", "Conjunto"],
+    {
+      placeholder: "Escolha o titular",
+    }
+  );
+}
+
+function buildRecurringEndDateChoiceKeyboard() {
+  return buildChoiceKeyboard(
+    [RECURRING_MENU_LABELS.noEndDate, RECURRING_MENU_LABELS.customEndDate],
+    {
+      placeholder: "A recorrência tem data final?",
+    }
+  );
+}
+
+function buildRecurringCardKeyboard(
+  cards: Array<{ name: string; bank: string }>
+) {
+  return buildChoiceKeyboard(
+    cards.map(getCardChoiceLabel).concat(RECURRING_MENU_LABELS.noCard),
+    {
+      columns: 1,
+      placeholder: "Selecione um cartão ou pule",
+    }
+  );
+}
+
+function buildRecurringConfirmKeyboard() {
+  return buildChoiceKeyboard([RECURRING_MENU_LABELS.confirm], {
+    placeholder: "Confirme a recorrência",
+  });
 }
 
 function getTodayIsoDate() {
@@ -633,7 +824,9 @@ async function resolveTelegramRuntimeConfig(): Promise<TelegramRuntimeConfig | n
     return null;
   }
 
-  const { householdId, memberIds } = await getHouseholdForUser(fallbackActor.id);
+  const householdContext = await getHouseholdContextForUser(fallbackActor.id);
+  const householdId = householdContext.householdId;
+  const memberIds = householdContext.members.map((member) => member.id);
   const settings = await getHouseholdSettingsMap(householdId);
 
   const botToken = env.TELEGRAM_BOT_TOKEN ?? settings.get("telegram_bot_token") ?? null;
@@ -652,7 +845,8 @@ async function resolveTelegramRuntimeConfig(): Promise<TelegramRuntimeConfig | n
       env.TELEGRAM_CHAT_OWNERSHIP_MAP ?? settings.get("telegram_chat_ownership_map")
     ),
     actorUserId: fallbackActor.id,
-    actorName: fallbackActor.name,
+    actorName: householdContext.self.name,
+    partnerName: householdContext.partner?.name ?? null,
     householdId,
     memberIds,
   };
@@ -754,7 +948,8 @@ async function findCardByName(memberIds: string[], rawCardName: string) {
     (card) =>
       normalizeCategoryKey(card.name) === normalizedName ||
       normalizeCategoryKey(`${card.bank} ${card.name}`) === normalizedName ||
-      normalizeCategoryKey(card.bank) === normalizedName
+      normalizeCategoryKey(card.bank) === normalizedName ||
+      normalizeCategoryKey(getCardChoiceLabel(card)) === normalizedName
   );
 
   if (matches.length === 1) {
@@ -784,6 +979,7 @@ function getHelpText(defaultOwnership: "mine" | "partner" | "joint") {
     "- toque em Novo gasto ou Nova receita",
     "- escolha um preset clicável",
     "- envie só o valor",
+    "- toque em Recorrente para abrir o wizard guiado",
     "",
     "Comandos:",
     "/gasto 675,24 | Moradia | Condomínio",
@@ -797,6 +993,7 @@ function getHelpText(defaultOwnership: "mine" | "partner" | "joint") {
     "- Se ownership não for enviado, o bot usa o padrão deste chat.",
     "- Para cartão, use cartao=Nome do cartão.",
     "- Datas usam YYYY-MM-DD e recorrência usa inicio/fim em YYYY-MM.",
+    "- O wizard de recorrência segue os mesmos campos principais da tela de lançamentos.",
   ].join("\n");
 }
 
@@ -1023,6 +1220,652 @@ async function handlePresetSelection(
   );
 }
 
+async function startRecurringWizard(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  defaultOwnership: "mine" | "partner" | "joint"
+) {
+  await savePendingState(config.householdId, chatId, {
+    kind: "recurring_wizard",
+    step: "type",
+    draft: {
+      ownership: defaultOwnership,
+      dayOfMonth: getCurrentDayOfMonth(),
+      startDate: getCurrentCompetencia(),
+      endDate: null,
+      cardId: null,
+      cardLabel: null,
+    },
+  });
+
+  await sendTelegramMessage(
+    config.botToken,
+    chatId,
+    "Vamos criar uma recorrência. Primeiro, escolha se é gasto ou receita.",
+    buildRecurringTypeKeyboard()
+  );
+}
+
+function buildRecurringSummary(
+  draft: TelegramRecurringDraft,
+  config: TelegramRuntimeConfig
+) {
+  return [
+    "Confirme os dados da recorrência:",
+    `Tipo: ${
+      draft.type === "expense" ? "Despesa" : "Receita"
+    }`,
+    `Descrição: ${draft.description}`,
+    `Categoria: ${draft.category}`,
+    `Valor: ${formatCurrency(draft.amount ?? 0)}`,
+    `Titular: ${formatOwnershipLabel(
+      draft.ownership ?? "mine",
+      config.actorName,
+      config.partnerName
+    )}`,
+    `Dia do mês: ${draft.dayOfMonth}`,
+    `Início: ${draft.startDate}`,
+    `Fim: ${draft.endDate ?? "Sem data final"}`,
+    draft.cardLabel ? `Cartão: ${draft.cardLabel}` : "Cartão: Sem cartão",
+  ].join("\n");
+}
+
+async function advanceRecurringWizardToCardOrConfirm(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  draft: TelegramRecurringDraft
+) {
+  if (draft.type !== "expense" || draft.ownership === "partner") {
+    await savePendingState(config.householdId, chatId, {
+      kind: "recurring_wizard",
+      step: "confirm",
+      draft: {
+        ...draft,
+        cardId: null,
+        cardLabel: null,
+      },
+    });
+
+    await sendTelegramMessage(
+      config.botToken,
+      chatId,
+      buildRecurringSummary(
+        {
+          ...draft,
+          cardId: null,
+          cardLabel: null,
+        },
+        config
+      ),
+      buildRecurringConfirmKeyboard()
+    );
+    return;
+  }
+
+  const cards = await listAvailableCards(config.memberIds);
+  if (cards.length === 0) {
+    await savePendingState(config.householdId, chatId, {
+      kind: "recurring_wizard",
+      step: "confirm",
+      draft: {
+        ...draft,
+        cardId: null,
+        cardLabel: null,
+      },
+    });
+
+    await sendTelegramMessage(
+      config.botToken,
+      chatId,
+      [
+        "Nenhum cartão disponível para vincular. Vou seguir sem cartão.",
+        "",
+        buildRecurringSummary(
+          {
+            ...draft,
+            cardId: null,
+            cardLabel: null,
+          },
+          config
+        ),
+      ].join("\n"),
+      buildRecurringConfirmKeyboard()
+    );
+    return;
+  }
+
+  await savePendingState(config.householdId, chatId, {
+    kind: "recurring_wizard",
+    step: "card",
+    draft,
+  });
+
+  await sendTelegramMessage(
+    config.botToken,
+    chatId,
+    "Se quiser, vincule a recorrência a um cartão de crédito. Também dá para seguir sem cartão.",
+    buildRecurringCardKeyboard(cards)
+  );
+}
+
+async function finalizeRecurringWizard(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  draft: TelegramRecurringDraft
+) {
+  const recurringInput = createRecurringSchema.safeParse({
+    description: draft.description,
+    category: draft.category,
+    amount: draft.amount,
+    type: draft.type,
+    ownership: draft.ownership,
+    dayOfMonth: draft.dayOfMonth,
+    startDate: draft.startDate,
+    endDate: draft.endDate ?? null,
+    interval: "monthly",
+    intervalCount: 1,
+    isVariable: false,
+    cardId: draft.cardId ?? null,
+  });
+
+  if (!recurringInput.success) {
+    await clearPendingState(config.householdId, chatId);
+    await sendMainMenu(
+      config,
+      chatId,
+      recurringInput.error.issues[0]?.message ??
+        "Não consegui validar a recorrência. Vamos começar de novo."
+    );
+    return;
+  }
+
+  const template = await createRecurringTemplate(
+    {
+      userId: config.actorUserId,
+      householdId: config.householdId,
+      memberIds: config.memberIds,
+    },
+    recurringInput.data
+  );
+
+  await clearPendingState(config.householdId, chatId);
+  await sendMainMenu(
+    config,
+    chatId,
+    [
+      "Recorrência criada com sucesso.",
+      `${template.type === "expense" ? "Despesa" : "Receita"}: ${template.description}`,
+      `Valor: ${formatCurrency(template.amount)}`,
+      `Categoria: ${template.category}`,
+      `Titular: ${formatOwnershipLabel(
+        template.ownership as "mine" | "partner" | "joint",
+        config.actorName,
+        config.partnerName
+      )}`,
+      `Início: ${template.startDate}`,
+      `Dia do mês: ${template.dayOfMonth}`,
+      `Fim: ${template.endDate ?? "Sem data final"}`,
+    ].join("\n")
+  );
+}
+
+async function handleRecurringWizardInput(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  pendingState: TelegramPendingRecurringState,
+  messageText: string,
+  defaultOwnership: "mine" | "partner" | "joint"
+) {
+  const text = messageText.trim();
+  const draft = {
+    ownership: defaultOwnership,
+    dayOfMonth: getCurrentDayOfMonth(),
+    startDate: getCurrentCompetencia(),
+    endDate: null,
+    cardId: null,
+    cardLabel: null,
+    ...pendingState.draft,
+  };
+
+  switch (pendingState.step) {
+    case "type": {
+      const normalized = normalizeCategoryKey(text);
+      const type =
+        normalized === normalizeCategoryKey(RECURRING_MENU_LABELS.expense)
+          ? "expense"
+          : normalized === normalizeCategoryKey(RECURRING_MENU_LABELS.income)
+            ? "income"
+            : null;
+
+      if (!type) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Escolha Gasto recorrente ou Receita recorrente para eu seguir.",
+          buildRecurringTypeKeyboard()
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "category",
+        draft: {
+          ...draft,
+          type,
+          cardId: null,
+          cardLabel: null,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Agora escolha a categoria dessa recorrência.",
+        buildRecurringCategoryKeyboard(type)
+      );
+      return true;
+    }
+
+    case "category": {
+      if (!draft.type) {
+        await startRecurringWizard(config, chatId, defaultOwnership);
+        return true;
+      }
+
+      if (
+        normalizeCategoryKey(text) ===
+        normalizeCategoryKey(RECURRING_MENU_LABELS.customCategory)
+      ) {
+        await savePendingState(config.householdId, chatId, {
+          kind: "recurring_wizard",
+          step: "custom_category",
+          draft,
+        });
+
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Me envie o nome da categoria como você quer salvar.",
+          buildCancelKeyboard("Digite a categoria")
+        );
+        return true;
+      }
+
+      const matchedCategory = getRecurringCategories(draft.type).find(
+        (category) => normalizeCategoryKey(category) === normalizeCategoryKey(text)
+      );
+
+      if (!matchedCategory) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Escolha uma categoria da lista ou toque em Outra categoria.",
+          buildRecurringCategoryKeyboard(draft.type)
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "description",
+        draft: {
+          ...draft,
+          category: matchedCategory,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Perfeito. Agora me envie a descrição dessa recorrência.",
+        buildCancelKeyboard("Digite a descrição")
+      );
+      return true;
+    }
+
+    case "custom_category": {
+      if (!text) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "A categoria não pode ficar vazia.",
+          buildCancelKeyboard("Digite a categoria")
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "description",
+        draft: {
+          ...draft,
+          category: canonicalizeCategory(text),
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Categoria salva. Agora me envie a descrição dessa recorrência.",
+        buildCancelKeyboard("Digite a descrição")
+      );
+      return true;
+    }
+
+    case "description": {
+      if (!text) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "A descrição não pode ficar vazia.",
+          buildCancelKeyboard("Digite a descrição")
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "amount",
+        draft: {
+          ...draft,
+          description: text,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Agora me envie o valor mensal dessa recorrência.",
+        buildCancelKeyboard("Digite o valor, por exemplo 480,00")
+      );
+      return true;
+    }
+
+    case "amount": {
+      const amount = parseAmount(text);
+      if (!amount) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Não consegui entender o valor. Tente algo como 480,00.",
+          buildCancelKeyboard("Digite o valor")
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "ownership",
+        draft: {
+          ...draft,
+          amount,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "De quem é essa recorrência?",
+        buildRecurringOwnershipKeyboard(config.actorName, config.partnerName)
+      );
+      return true;
+    }
+
+    case "ownership": {
+      const ownership = resolveOwnershipFromInput(
+        text,
+        config.actorName,
+        config.partnerName
+      );
+
+      if (!ownership) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Escolha um dos titulares mostrados no teclado.",
+          buildRecurringOwnershipKeyboard(config.actorName, config.partnerName)
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "day",
+        draft: {
+          ...draft,
+          ownership,
+          cardId: ownership === "partner" ? null : draft.cardId,
+          cardLabel: ownership === "partner" ? null : draft.cardLabel,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Qual é o dia do mês dessa recorrência? Pode mandar só o número, como 30.",
+        buildCancelKeyboard("Digite o dia do mês")
+      );
+      return true;
+    }
+
+    case "day": {
+      const dayOfMonth = parseDayOfMonth(text);
+      if (!dayOfMonth) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Me envie um dia válido entre 1 e 31.",
+          buildCancelKeyboard("Digite o dia do mês")
+        );
+        return true;
+      }
+
+      const currentCompetencia = getCurrentCompetencia();
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "start_date",
+        draft: {
+          ...draft,
+          dayOfMonth,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        `Quando essa recorrência começa? Toque em ${currentCompetencia} ou envie outra competência em YYYY-MM.`,
+        buildChoiceKeyboard([currentCompetencia], {
+          columns: 1,
+          placeholder: "Escolha ou digite a competência inicial",
+        })
+      );
+      return true;
+    }
+
+    case "start_date": {
+      if (!isCompetenciaValue(text)) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "A competência inicial precisa estar em YYYY-MM.",
+          buildCancelKeyboard("Exemplo: 2026-04")
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "end_date_choice",
+        draft: {
+          ...draft,
+          startDate: text,
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Essa recorrência tem data final?",
+        buildRecurringEndDateChoiceKeyboard()
+      );
+      return true;
+    }
+
+    case "end_date_choice": {
+      const normalized = normalizeCategoryKey(text);
+      if (
+        normalized === normalizeCategoryKey(RECURRING_MENU_LABELS.noEndDate)
+      ) {
+        await advanceRecurringWizardToCardOrConfirm(config, chatId, {
+          ...draft,
+          endDate: null,
+        });
+        return true;
+      }
+
+      if (
+        normalized === normalizeCategoryKey(RECURRING_MENU_LABELS.customEndDate)
+      ) {
+        await savePendingState(config.householdId, chatId, {
+          kind: "recurring_wizard",
+          step: "end_date_value",
+          draft,
+        });
+
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Perfeito. Agora me envie a competência final em YYYY-MM.",
+          buildCancelKeyboard("Exemplo: 2026-12")
+        );
+        return true;
+      }
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        "Escolha se a recorrência termina em algum mês ou segue sem data final.",
+        buildRecurringEndDateChoiceKeyboard()
+      );
+      return true;
+    }
+
+    case "end_date_value": {
+      if (!isCompetenciaValue(text)) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "A competência final precisa estar em YYYY-MM.",
+          buildCancelKeyboard("Exemplo: 2026-12")
+        );
+        return true;
+      }
+
+      if (draft.startDate && text < draft.startDate) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "A data final não pode ser anterior ao início.",
+          buildCancelKeyboard("Exemplo: 2026-12")
+        );
+        return true;
+      }
+
+      await advanceRecurringWizardToCardOrConfirm(config, chatId, {
+        ...draft,
+        endDate: text,
+      });
+      return true;
+    }
+
+    case "card": {
+      if (normalizeCategoryKey(text) === normalizeCategoryKey(RECURRING_MENU_LABELS.noCard)) {
+        await savePendingState(config.householdId, chatId, {
+          kind: "recurring_wizard",
+          step: "confirm",
+          draft: {
+            ...draft,
+            cardId: null,
+            cardLabel: null,
+          },
+        });
+
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          buildRecurringSummary(
+            {
+              ...draft,
+              cardId: null,
+              cardLabel: null,
+            },
+            config
+          ),
+          buildRecurringConfirmKeyboard()
+        );
+        return true;
+      }
+
+      const cardResolution = await findCardByName(config.memberIds, text);
+      if (cardResolution.kind !== "ok") {
+        const cards = await listAvailableCards(config.memberIds);
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          cardResolution.message,
+          buildRecurringCardKeyboard(cards)
+        );
+        return true;
+      }
+
+      await savePendingState(config.householdId, chatId, {
+        kind: "recurring_wizard",
+        step: "confirm",
+        draft: {
+          ...draft,
+          cardId: cardResolution.card.id,
+          cardLabel: getCardChoiceLabel(cardResolution.card),
+        },
+      });
+
+      await sendTelegramMessage(
+        config.botToken,
+        chatId,
+        buildRecurringSummary(
+          {
+            ...draft,
+            cardId: cardResolution.card.id,
+            cardLabel: getCardChoiceLabel(cardResolution.card),
+          },
+          config
+        ),
+        buildRecurringConfirmKeyboard()
+      );
+      return true;
+    }
+
+    case "confirm": {
+      if (
+        normalizeCategoryKey(text) !== normalizeCategoryKey(RECURRING_MENU_LABELS.confirm)
+      ) {
+        await sendTelegramMessage(
+          config.botToken,
+          chatId,
+          "Se estiver tudo certo, toque em Confirmar. Se não, toque em Cancelar e eu reinicio o fluxo.",
+          buildRecurringConfirmKeyboard()
+        );
+        return true;
+      }
+
+      await finalizeRecurringWizard(config, chatId, draft);
+      return true;
+    }
+  }
+
+  return true;
+}
+
 async function handlePendingStateInput(
   config: TelegramRuntimeConfig,
   chatId: string,
@@ -1030,6 +1873,16 @@ async function handlePendingStateInput(
   messageText: string,
   defaultOwnership: "mine" | "partner" | "joint"
 ) {
+  if (pendingState.kind === "recurring_wizard") {
+    return handleRecurringWizardInput(
+      config,
+      chatId,
+      pendingState,
+      messageText,
+      defaultOwnership
+    );
+  }
+
   if (pendingState.kind !== "preset_amount") {
     await clearPendingState(config.householdId, chatId);
     await sendMainMenu(config, chatId, "Estado do bot reiniciado.");
@@ -1207,14 +2060,7 @@ export async function handleTelegramUpdate(
 
   if (parsedCommand.kind === "recurring_menu") {
     await clearPendingState(config.householdId, chatId);
-    await sendMainMenu(
-      config,
-      chatId,
-      [
-        "Para recorrência, o jeito mais seguro continua sendo o comando completo.",
-        "/recorrente gasto | 480 | Saúde | Psicólogo | dia=30 | ownership=partner | inicio=2026-04",
-      ].join("\n")
-    );
+    await startRecurringWizard(config, chatId, defaultOwnership);
     return { status: 200 as const, body: { ok: true } };
   }
 
