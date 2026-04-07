@@ -51,16 +51,31 @@ function getDateForCompetencia(competencia: string, referenceDay: number) {
   return new Date(year, month - 1, safeDay);
 }
 
-function parseCSVLine(line: string) {
+function normalizeMalformedInterCsvLine(line: string) {
+  if (!line.startsWith('"') || !line.includes(',""')) {
+    return line;
+  }
+
+  let normalized = line.slice(1).replace(/""/g, '"');
+
+  if (normalized.endsWith('""')) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+export function parseCSVLine(line: string) {
+  const normalizedLine = normalizeMalformedInterCsvLine(line);
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
 
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
+  for (let index = 0; index < normalizedLine.length; index += 1) {
+    const character = normalizedLine[index];
 
     if (character === '"') {
-      if (inQuotes && line[index + 1] === '"') {
+      if (inQuotes && normalizedLine[index + 1] === '"') {
         current += '"';
         index += 1;
       } else {
