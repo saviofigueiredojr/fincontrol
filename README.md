@@ -26,7 +26,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - Marcacao de transacoes secretas
 - Importacao de faturas por CSV do Inter e OFX
 - Controle de parcelas ativas
-- Bot opcional no Telegram para lancamentos por comando e presets clicaveis
+- Bot opcional no Telegram para lancamentos por comando, presets clicaveis e recorrencias guiadas
 - Divisao de despesas em modo `50/50`, proporcional ou personalizado
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes

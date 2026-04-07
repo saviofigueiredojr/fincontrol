@@ -37,7 +37,9 @@ Receives Telegram Bot API updates.
   - `/recorrente`
   - `/cartoes`
   - `/whoami`
-- Also supports reply-keyboard flows for preset-based expense and income creation
+- Also supports reply-keyboard flows for:
+  - preset-based expense and income creation
+  - guided recurring creation with category, ownership, day of month, start month, optional end month and optional card binding
 
 Configuration sources:
 
