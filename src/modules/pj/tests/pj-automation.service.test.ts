@@ -3,9 +3,9 @@ import { PjAutomationService } from "../pj-automation.service";
 
 describe("PjAutomationService", () => {
     describe("calculateTaxProvision", () => {
-        it("should correctly calculate tax based on percentage", () => {
-            expect(PjAutomationService.calculateTaxProvision(1000, 6.0)).toBe(60);
-            expect(PjAutomationService.calculateTaxProvision(1500, 10.5)).toBe(157.5);
+        it("should correctly calculate Simples plus INSS over pro-labore", () => {
+            expect(PjAutomationService.calculateTaxProvision(1000, 6.0)).toBe(90.8);
+            expect(PjAutomationService.calculateTaxProvision(1500, 10.5)).toBe(203.7);
         });
 
         it("should return 0 if tax rate is missing or zero", () => {

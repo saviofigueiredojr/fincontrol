@@ -55,7 +55,7 @@ export async function PATCH(
             });
             transactionId = transaction.id;
 
-            // 2. Calcula e provisiona automático eventuais impostos (Retenções/Simples)
+            // 2. Calcula e provisiona automático impostos PJ (DAS + INSS sobre pró-labore)
             const household = await prisma.household.findUnique({
                 where: { id: existing.householdId },
                 select: { pjTaxRate: true }
@@ -68,7 +68,7 @@ export async function PATCH(
                     data: {
                         date: new Date(), // Vence no mês corrente para não esquecer de pagar a guia
                         competencia: existing.competencia,
-                        description: `Imposto B2B (Simples/DAS) - ${existing.clientName}`,
+                        description: `Provisão PJ (DAS + INSS pró-labore) - ${existing.clientName}`,
                         category: "Impostos PJ",
                         amount: taxAmount,
                         type: "expense",

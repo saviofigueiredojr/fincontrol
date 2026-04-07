@@ -1,15 +1,28 @@
 import { PjRetainer, PjReceipt } from "@prisma/client";
 
+const DEFAULT_PRO_LABORE_SHARE = 0.28;
+const DEFAULT_INSS_RATE = 0.11;
+
 export class PjAutomationService {
     /**
-     * Calculates the exact tax amount based on the receipt amount and the household's set tax rate.
+     * Calculates the exact PJ tax provision based on:
+     * - Simples/DAS over gross revenue
+     * - INSS over the pró-labore share of that revenue
+     *
+     * This keeps the current household-level configuration (`pjTaxRate`) as the
+     * Simples percentage and applies the fixed pró-labore approximation used by the app.
+     *
      * @param amount The gross receipt amount
-     * @param taxRate The percentage tax rate (e.g., 6.0 for 6%)
+     * @param taxRate The Simples/DAS percentage rate (e.g., 6.0 for 6%)
      * @returns The exact calculated tax equivalent, or 0 if disabled
      */
     static calculateTaxProvision(amount: number, taxRate?: number | null): number {
         if (!taxRate || taxRate <= 0) return 0;
-        return Number(((amount * taxRate) / 100).toFixed(2));
+
+        const effectiveRate =
+            taxRate / 100 + DEFAULT_PRO_LABORE_SHARE * DEFAULT_INSS_RATE;
+
+        return Number((amount * effectiveRate).toFixed(2));
     }
 
     /**
