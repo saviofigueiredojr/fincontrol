@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
-const DUMMY_HASH = "$2a$10$dummyhashfortimingsafetydummyhashfortixx";
+const DUMMY_HASH = "$2a$10$KzXQ11E068aChyrwtTD3cOlRjIEFASuROtzY5I.lXwT7GbrnJq/Ji";
 const MAX_FAILED_ATTEMPTS = 5;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const BLOCK_DURATION_MS = 30 * 60 * 1000;
@@ -26,7 +26,19 @@ interface AuthorizedUser {
 
 function normalizeIpCandidate(value: string): string | null {
   const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
+  if (!normalized || normalized.toLowerCase() === "unknown") {
+    return null;
+  }
+
+  return normalized;
+}
+
+function getHeaderValue(
+  headers: AuthHeaders,
+  headerName: string
+): string | undefined {
+  const rawValue = headers[headerName];
+  return Array.isArray(rawValue) ? rawValue[0] : rawValue;
 }
 
 export function extractClientIp(req?: AuthRequestLike): string {
@@ -34,10 +46,22 @@ export function extractClientIp(req?: AuthRequestLike): string {
     return "unknown";
   }
 
-  const forwarded = req.headers["x-forwarded-for"];
-  const realIp = req.headers["x-real-ip"];
+  const trustedHeaders = [
+    "x-vercel-forwarded-for",
+    "x-real-ip",
+  ] as const;
 
-  const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  for (const headerName of trustedHeaders) {
+    const trustedValue = getHeaderValue(req.headers, headerName);
+    if (typeof trustedValue === "string") {
+      const normalized = normalizeIpCandidate(trustedValue);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  const forwardedValue = getHeaderValue(req.headers, "x-forwarded-for");
   if (typeof forwardedValue === "string") {
     const firstIp = forwardedValue
       .split(",")
@@ -46,14 +70,6 @@ export function extractClientIp(req?: AuthRequestLike): string {
 
     if (firstIp) {
       return firstIp;
-    }
-  }
-
-  const realIpValue = Array.isArray(realIp) ? realIp[0] : realIp;
-  if (typeof realIpValue === "string") {
-    const normalized = normalizeIpCandidate(realIpValue);
-    if (normalized) {
-      return normalized;
     }
   }
 
@@ -71,11 +87,16 @@ async function recordLoginAttempt(email: string, ip: string, success: boolean) {
 }
 
 async function getBlockingClusterExpiry(email: string, ip: string): Promise<Date | null> {
+  const now = new Date();
+  const failureWindowStart = new Date(now.getTime() - FAILURE_WINDOW_MS);
   const recentFailures = await prisma.loginAttempt.findMany({
     where: {
       email: email.toLowerCase(),
       ip,
       success: false,
+      createdAt: {
+        gte: failureWindowStart,
+      },
     },
     orderBy: { createdAt: "desc" },
     take: MAX_FAILED_ATTEMPTS,
@@ -86,11 +107,6 @@ async function getBlockingClusterExpiry(email: string, ip: string): Promise<Date
   }
 
   const latestAttempt = recentFailures[0];
-  const oldestAttempt = recentFailures[MAX_FAILED_ATTEMPTS - 1];
-
-  if (latestAttempt.createdAt.getTime() - oldestAttempt.createdAt.getTime() > FAILURE_WINDOW_MS) {
-    return null;
-  }
 
   return new Date(latestAttempt.createdAt.getTime() + BLOCK_DURATION_MS);
 }
@@ -159,8 +175,6 @@ export async function authorizeCredentials(
     await recordLoginAttempt(normalizedCredentials.email, ip, false);
     return null;
   }
-
-  await recordLoginAttempt(normalizedCredentials.email, ip, true);
 
   return {
     id: user.id,
