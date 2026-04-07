@@ -9,7 +9,7 @@ export const SENSITIVE_SETTING_KEYS = new Set([
 ]);
 
 export function isSensitiveSettingKey(key: string) {
-  return SENSITIVE_SETTING_KEYS.has(key);
+  return SENSITIVE_SETTING_KEYS.has(key) || key.startsWith("telegram_");
 }
 
 export async function getHouseholdSettingsMap(householdId: string) {
@@ -24,4 +24,22 @@ export async function getHouseholdSettingValue(householdId: string, key: string)
   });
 
   return setting?.value ?? null;
+}
+
+export async function upsertHouseholdSettingValue(
+  householdId: string,
+  key: string,
+  value: string
+) {
+  return prisma.setting.upsert({
+    where: { householdId_key: { householdId, key } },
+    create: { householdId, key, value },
+    update: { value },
+  });
+}
+
+export async function deleteHouseholdSettingValue(householdId: string, key: string) {
+  return prisma.setting.deleteMany({
+    where: { householdId, key },
+  });
 }

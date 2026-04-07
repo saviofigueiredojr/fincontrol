@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
 import { getHouseholdContextForUser, getHouseholdForUser } from "@/lib/household";
-import { getHouseholdSettingsMap } from "@/lib/settings";
+import {
+  deleteHouseholdSettingValue,
+  getHouseholdSettingValue,
+  getHouseholdSettingsMap,
+  upsertHouseholdSettingValue,
+} from "@/lib/settings";
 import { formatCurrency, getCurrentCompetencia, normalizeCategoryKey } from "@/lib/utils";
 import { createTransactionWithInstallments } from "@/modules/transactions/transactions.service";
 import { createRecurringSchema } from "@/modules/recurring/recurring.schemas";
@@ -87,10 +92,55 @@ interface TelegramRuntimeConfig {
   memberIds: string[];
 }
 
+interface TelegramReplyKeyboardMarkup {
+  keyboard: Array<Array<{ text: string }>>;
+  resize_keyboard?: boolean;
+  one_time_keyboard?: boolean;
+  input_field_placeholder?: string;
+  is_persistent?: boolean;
+}
+
+interface TelegramReplyKeyboardRemove {
+  remove_keyboard: true;
+}
+
+type TelegramReplyMarkup = TelegramReplyKeyboardMarkup | TelegramReplyKeyboardRemove;
+
+interface TelegramPresetDefinition {
+  id: string;
+  label: string;
+  type: "income" | "expense";
+  category: string;
+  description: string;
+  ownership?: "mine" | "partner" | "joint";
+  cardName?: string;
+}
+
+interface TelegramPendingPresetState {
+  kind: "preset_amount";
+  presetId: string;
+}
+
+type TelegramPendingState = TelegramPendingPresetState;
+
+const TELEGRAM_CHAT_STATE_PREFIX = "telegram_chat_state:";
+const MAIN_MENU_LABELS = {
+  expense: "Novo gasto",
+  income: "Nova receita",
+  recurring: "Recorrente",
+  cards: "Cartões",
+  help: "Ajuda",
+  cancel: "Cancelar",
+} as const;
+
 type ParsedCommand =
   | { kind: "help" }
   | { kind: "whoami" }
   | { kind: "cards" }
+  | { kind: "preset_menu"; type: "expense" | "income" }
+  | { kind: "preset_pick"; presetId: string }
+  | { kind: "cancel" }
+  | { kind: "recurring_menu" }
   | {
       kind: "transaction";
       type: "income" | "expense";
@@ -143,6 +193,176 @@ function parseChatOwnershipMap(value?: string | null) {
   }
 
   return map;
+}
+
+function getTelegramChatStateKey(chatId: string) {
+  return `${TELEGRAM_CHAT_STATE_PREFIX}${chatId}`;
+}
+
+function button(text: string) {
+  return { text };
+}
+
+function buildMainMenuKeyboard(): TelegramReplyKeyboardMarkup {
+  return {
+    keyboard: [
+      [button(MAIN_MENU_LABELS.expense), button(MAIN_MENU_LABELS.income)],
+      [button(MAIN_MENU_LABELS.recurring), button(MAIN_MENU_LABELS.cards)],
+      [button(MAIN_MENU_LABELS.help)],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "Escolha uma ação",
+  };
+}
+
+function buildCancelKeyboard(placeholder = "Envie o valor ou toque em Cancelar"): TelegramReplyKeyboardMarkup {
+  return {
+    keyboard: [[button(MAIN_MENU_LABELS.cancel)]],
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    input_field_placeholder: placeholder,
+  };
+}
+
+function getExpensePresets(): TelegramPresetDefinition[] {
+  return [
+    {
+      id: "expense-condominio",
+      label: "Condomínio",
+      type: "expense",
+      category: "Moradia",
+      description: "Condomínio",
+      ownership: "joint",
+    },
+    {
+      id: "expense-mercado",
+      label: "Mercado",
+      type: "expense",
+      category: "Alimentação",
+      description: "Mercado",
+      ownership: "joint",
+    },
+    {
+      id: "expense-aluguel",
+      label: "Aluguel",
+      type: "expense",
+      category: "Moradia",
+      description: "Aluguel",
+      ownership: "joint",
+    },
+    {
+      id: "expense-luz",
+      label: "Luz",
+      type: "expense",
+      category: "Moradia",
+      description: "Luz",
+      ownership: "joint",
+    },
+    {
+      id: "expense-internet",
+      label: "Internet",
+      type: "expense",
+      category: "Moradia",
+      description: "Internet",
+      ownership: "joint",
+    },
+    {
+      id: "expense-transporte",
+      label: "Transporte",
+      type: "expense",
+      category: "Transporte",
+      description: "Transporte",
+    },
+    {
+      id: "expense-saude",
+      label: "Saúde",
+      type: "expense",
+      category: "Saúde",
+      description: "Saúde",
+    },
+    {
+      id: "expense-lazer",
+      label: "Lazer",
+      type: "expense",
+      category: "Lazer",
+      description: "Lazer",
+    },
+  ];
+}
+
+function getIncomePresets(actorName: string): TelegramPresetDefinition[] {
+  return [
+    {
+      id: "income-primary",
+      label: "Renda principal",
+      type: "income",
+      category: "Salário",
+      description: `Renda principal - ${actorName}`,
+    },
+    {
+      id: "income-extra",
+      label: "Receita extra",
+      type: "income",
+      category: "Receita Extra",
+      description: "Receita extra",
+    },
+    {
+      id: "income-reembolso",
+      label: "Reembolso",
+      type: "income",
+      category: "Receita Extra",
+      description: "Reembolso",
+    },
+    {
+      id: "income-venda",
+      label: "Venda",
+      type: "income",
+      category: "Receita Extra",
+      description: "Venda",
+    },
+  ];
+}
+
+function getTelegramPresets(actorName: string) {
+  return [...getExpensePresets(), ...getIncomePresets(actorName)];
+}
+
+function getPresetById(actorName: string, presetId: string) {
+  return getTelegramPresets(actorName).find((preset) => preset.id === presetId) ?? null;
+}
+
+function getPresetByLabel(actorName: string, label: string) {
+  return (
+    getTelegramPresets(actorName).find(
+      (preset) => normalizeCategoryKey(preset.label) === normalizeCategoryKey(label)
+    ) ?? null
+  );
+}
+
+function buildPresetKeyboard(
+  actorName: string,
+  type: "expense" | "income"
+): TelegramReplyKeyboardMarkup {
+  const presets =
+    type === "expense" ? getExpensePresets() : getIncomePresets(actorName);
+
+  const rows: TelegramReplyKeyboardMarkup["keyboard"] = [];
+  for (let index = 0; index < presets.length; index += 2) {
+    rows.push(
+      presets.slice(index, index + 2).map((preset) => button(preset.label))
+    );
+  }
+
+  rows.push([button(MAIN_MENU_LABELS.cancel)]);
+
+  return {
+    keyboard: rows,
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    input_field_placeholder:
+      type === "expense" ? "Escolha um gasto rápido" : "Escolha uma receita rápida",
+  };
 }
 
 function getTodayIsoDate() {
@@ -252,8 +472,39 @@ function parseExtraSegments(segments: string[]) {
   return { keyValues, positional };
 }
 
-function parseCommand(text: string): ParsedCommand {
+function parseCommand(text: string, actorName: string): ParsedCommand {
   const trimmed = text.trim();
+  const normalizedText = normalizeCategoryKey(trimmed);
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.expense)) {
+    return { kind: "preset_menu", type: "expense" };
+  }
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.income)) {
+    return { kind: "preset_menu", type: "income" };
+  }
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.recurring)) {
+    return { kind: "recurring_menu" };
+  }
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.cards)) {
+    return { kind: "cards" };
+  }
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.help)) {
+    return { kind: "help" };
+  }
+
+  if (normalizedText === normalizeCategoryKey(MAIN_MENU_LABELS.cancel)) {
+    return { kind: "cancel" };
+  }
+
+  const preset = getPresetByLabel(actorName, trimmed);
+  if (preset) {
+    return { kind: "preset_pick", presetId: preset.id };
+  }
+
   if (!trimmed.startsWith("/")) {
     return { kind: "unknown", error: "Use /ajuda para ver os comandos disponíveis." };
   }
@@ -407,6 +658,43 @@ async function resolveTelegramRuntimeConfig(): Promise<TelegramRuntimeConfig | n
   };
 }
 
+async function loadPendingState(
+  householdId: string,
+  chatId: string
+): Promise<TelegramPendingState | null> {
+  const value = await getHouseholdSettingValue(
+    householdId,
+    getTelegramChatStateKey(chatId)
+  );
+
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as TelegramPendingState;
+  } catch {
+    await deleteHouseholdSettingValue(householdId, getTelegramChatStateKey(chatId));
+    return null;
+  }
+}
+
+async function savePendingState(
+  householdId: string,
+  chatId: string,
+  state: TelegramPendingState
+) {
+  await upsertHouseholdSettingValue(
+    householdId,
+    getTelegramChatStateKey(chatId),
+    JSON.stringify(state)
+  );
+}
+
+async function clearPendingState(householdId: string, chatId: string) {
+  await deleteHouseholdSettingValue(householdId, getTelegramChatStateKey(chatId));
+}
+
 async function callTelegramApi<TPayload extends Record<string, unknown>>(
   botToken: string,
   method: string,
@@ -426,11 +714,17 @@ async function callTelegramApi<TPayload extends Record<string, unknown>>(
   return response.json();
 }
 
-async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
+async function sendTelegramMessage(
+  botToken: string,
+  chatId: string,
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
+) {
   await callTelegramApi(botToken, "sendMessage", {
     chat_id: Number(chatId),
     text,
     disable_web_page_preview: true,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
 }
 
@@ -486,6 +780,11 @@ function getHelpText(defaultOwnership: "mine" | "partner" | "joint") {
     "",
     `Ownership padrão deste chat: ${defaultOwnership}`,
     "",
+    "Atalhos rápidos:",
+    "- toque em Novo gasto ou Nova receita",
+    "- escolha um preset clicável",
+    "- envie só o valor",
+    "",
     "Comandos:",
     "/gasto 675,24 | Moradia | Condomínio",
     "/gasto 120 | Alimentação | Mercado | joint | 2026-04-04 | cartao=Inter",
@@ -512,6 +811,19 @@ function getUnauthorizedText(chatId: string, fromId?: number) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function sendMainMenu(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  text = "Escolha uma ação."
+) {
+  await sendTelegramMessage(
+    config.botToken,
+    chatId,
+    text,
+    buildMainMenuKeyboard()
+  );
 }
 
 async function handleTransactionCommand(
@@ -568,8 +880,8 @@ async function handleTransactionCommand(
     }
   );
 
-  await sendTelegramMessage(
-    config.botToken,
+  await sendMainMenu(
+    config,
     chatId,
     [
       "Lançamento criado com sucesso.",
@@ -631,8 +943,8 @@ async function handleRecurringCommand(
     recurringInput.data
   );
 
-  await sendTelegramMessage(
-    config.botToken,
+  await sendMainMenu(
+    config,
     chatId,
     [
       "Recorrência criada com sucesso.",
@@ -648,12 +960,12 @@ async function handleRecurringCommand(
 async function handleCardsCommand(config: TelegramRuntimeConfig, chatId: string) {
   const cards = await listAvailableCards(config.memberIds);
   if (cards.length === 0) {
-    await sendTelegramMessage(config.botToken, chatId, "Nenhum cartão cadastrado no household.");
+    await sendMainMenu(config, chatId, "Nenhum cartão cadastrado no household.");
     return;
   }
 
-  await sendTelegramMessage(
-    config.botToken,
+  await sendMainMenu(
+    config,
     chatId,
     [
       "Cartões disponíveis:",
@@ -663,6 +975,134 @@ async function handleCardsCommand(config: TelegramRuntimeConfig, chatId: string)
       ),
     ].join("\n")
   );
+}
+
+async function handlePresetMenuCommand(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  type: "expense" | "income"
+) {
+  const text =
+    type === "expense"
+      ? "Escolha um gasto rápido e depois me envie só o valor."
+      : "Escolha uma receita rápida e depois me envie só o valor.";
+
+  await sendTelegramMessage(
+    config.botToken,
+    chatId,
+    text,
+    buildPresetKeyboard(config.actorName, type)
+  );
+}
+
+async function handlePresetSelection(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  presetId: string
+) {
+  const preset = getPresetById(config.actorName, presetId);
+  if (!preset) {
+    await sendMainMenu(config, chatId, "Não encontrei esse preset. Tente novamente.");
+    return;
+  }
+
+  await savePendingState(config.householdId, chatId, {
+    kind: "preset_amount",
+    presetId,
+  });
+
+  await sendTelegramMessage(
+    config.botToken,
+    chatId,
+    [
+      `${preset.type === "expense" ? "Gasto" : "Receita"} selecionado: ${preset.label}`,
+      "Agora me envie só o valor.",
+      "Se quiser cancelar, toque em Cancelar.",
+    ].join("\n"),
+    buildCancelKeyboard("Envie apenas o valor, por exemplo 675,24")
+  );
+}
+
+async function handlePendingStateInput(
+  config: TelegramRuntimeConfig,
+  chatId: string,
+  pendingState: TelegramPendingState,
+  messageText: string,
+  defaultOwnership: "mine" | "partner" | "joint"
+) {
+  if (pendingState.kind !== "preset_amount") {
+    await clearPendingState(config.householdId, chatId);
+    await sendMainMenu(config, chatId, "Estado do bot reiniciado.");
+    return true;
+  }
+
+  const preset = getPresetById(config.actorName, pendingState.presetId);
+  if (!preset) {
+    await clearPendingState(config.householdId, chatId);
+    await sendMainMenu(config, chatId, "O preset anterior não existe mais. Vamos recomeçar.");
+    return true;
+  }
+
+  const segments = splitSegments(messageText);
+  const amount = parseAmount(segments[0] ?? "");
+  if (!amount) {
+    await sendTelegramMessage(
+      config.botToken,
+      chatId,
+      "Não consegui entender esse valor. Tente algo como 675,24.",
+      buildCancelKeyboard("Digite só o valor")
+    );
+    return true;
+  }
+
+  const date =
+    segments.find((segment) => /^\d{4}-\d{2}-\d{2}$/.test(segment)) ?? getTodayIsoDate();
+
+  let cardId: string | null = null;
+  if (preset.cardName) {
+    const cardResolution = await findCardByName(config.memberIds, preset.cardName);
+    if (cardResolution.kind !== "ok") {
+      await clearPendingState(config.householdId, chatId);
+      await sendMainMenu(config, chatId, cardResolution.message);
+      return true;
+    }
+    cardId = cardResolution.card.id;
+  }
+
+  const createdTransactions = await createTransactionWithInstallments(
+    {
+      userId: config.actorUserId,
+      memberIds: config.memberIds,
+    },
+    {
+      date,
+      competencia: date.slice(0, 7),
+      description: preset.description,
+      category: preset.category,
+      amount,
+      type: preset.type,
+      ownership: preset.ownership ?? defaultOwnership,
+      isSecret: false,
+      source: "telegram",
+      cardId,
+    }
+  );
+
+  await clearPendingState(config.householdId, chatId);
+  await sendMainMenu(
+    config,
+    chatId,
+    [
+      "Lançamento criado com sucesso.",
+      `${preset.type === "expense" ? "Despesa" : "Receita"}: ${preset.description}`,
+      `Valor: ${formatCurrency(amount)}`,
+      `Categoria: ${preset.category}`,
+      `Competência: ${date.slice(0, 7)}`,
+      `Ocorrências criadas: ${createdTransactions.length}`,
+    ].join("\n")
+  );
+
+  return true;
 }
 
 export async function handleTelegramUpdate(
@@ -692,13 +1132,25 @@ export async function handleTelegramUpdate(
     return { status: 200 as const, body: { ok: true } };
   }
 
-  const parsedCommand = parseCommand(message.text);
   const chatId = String(message.chat.id);
   const defaultOwnership = config.chatOwnershipMap.get(chatId) ?? "mine";
   const isAuthorizedChat = config.allowedChatIds.has(chatId);
+  const pendingState = await loadPendingState(config.householdId, chatId);
+  const parsedCommand = parseCommand(message.text, config.actorName);
+
+  if (parsedCommand.kind === "cancel") {
+    await clearPendingState(config.householdId, chatId);
+    await sendMainMenu(config, chatId, "Fluxo cancelado.");
+    return { status: 200 as const, body: { ok: true } };
+  }
 
   if (parsedCommand.kind === "help") {
-    await sendTelegramMessage(config.botToken, chatId, getHelpText(defaultOwnership));
+    await sendTelegramMessage(
+      config.botToken,
+      chatId,
+      getHelpText(defaultOwnership),
+      buildMainMenuKeyboard()
+    );
     return { status: 200 as const, body: { ok: true } };
   }
 
@@ -715,7 +1167,8 @@ export async function handleTelegramUpdate(
         `ator do household: ${householdContext.self.name}`,
       ]
         .filter(Boolean)
-        .join("\n")
+        .join("\n"),
+      buildMainMenuKeyboard()
     );
     return { status: 200 as const, body: { ok: true } };
   }
@@ -724,26 +1177,65 @@ export async function handleTelegramUpdate(
     await sendTelegramMessage(
       config.botToken,
       chatId,
-      getUnauthorizedText(chatId, message.from?.id)
+      getUnauthorizedText(chatId, message.from?.id),
+      buildMainMenuKeyboard()
+    );
+    return { status: 200 as const, body: { ok: true } };
+  }
+
+  if (pendingState && parsedCommand.kind === "unknown") {
+    await handlePendingStateInput(
+      config,
+      chatId,
+      pendingState,
+      message.text,
+      defaultOwnership
+    );
+    return { status: 200 as const, body: { ok: true } };
+  }
+
+  if (parsedCommand.kind === "preset_menu") {
+    await clearPendingState(config.householdId, chatId);
+    await handlePresetMenuCommand(config, chatId, parsedCommand.type);
+    return { status: 200 as const, body: { ok: true } };
+  }
+
+  if (parsedCommand.kind === "preset_pick") {
+    await handlePresetSelection(config, chatId, parsedCommand.presetId);
+    return { status: 200 as const, body: { ok: true } };
+  }
+
+  if (parsedCommand.kind === "recurring_menu") {
+    await clearPendingState(config.householdId, chatId);
+    await sendMainMenu(
+      config,
+      chatId,
+      [
+        "Para recorrência, o jeito mais seguro continua sendo o comando completo.",
+        "/recorrente gasto | 480 | Saúde | Psicólogo | dia=30 | ownership=partner | inicio=2026-04",
+      ].join("\n")
     );
     return { status: 200 as const, body: { ok: true } };
   }
 
   if (parsedCommand.kind === "cards") {
+    await clearPendingState(config.householdId, chatId);
     await handleCardsCommand(config, chatId);
     return { status: 200 as const, body: { ok: true } };
   }
 
   if (parsedCommand.kind === "transaction") {
+    await clearPendingState(config.householdId, chatId);
     await handleTransactionCommand(config, chatId, parsedCommand, defaultOwnership);
     return { status: 200 as const, body: { ok: true } };
   }
 
   if (parsedCommand.kind === "recurring") {
+    await clearPendingState(config.householdId, chatId);
     await handleRecurringCommand(config, chatId, parsedCommand, defaultOwnership);
     return { status: 200 as const, body: { ok: true } };
   }
 
-  await sendTelegramMessage(config.botToken, chatId, parsedCommand.error);
+  await sendMainMenu(config, chatId, parsedCommand.error);
   return { status: 200 as const, body: { ok: true } };
 }
