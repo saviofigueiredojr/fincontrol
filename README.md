@@ -26,7 +26,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - Marcacao de transacoes secretas
 - Importacao de faturas por CSV do Inter e OFX
 - Controle de parcelas ativas
-- Bot opcional no Telegram para lancamentos por comando
+- Bot opcional no Telegram para lancamentos por comando e presets clicaveis
 - Divisao de despesas em modo `50/50`, proporcional ou personalizado
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes
@@ -191,6 +191,15 @@ O terceiro usuario fica em outro `household` e serve para validar isolamento de 
 - `npm run db:studio`: abre o Prisma Studio
 - `npm run ci`: roda o conjunto minimo usado na CI
 - `npm run telegram:sync`: registra comandos e webhook do bot do Telegram
+
+## Telegram bot
+
+O bot do Telegram pode ser usado em dois modos:
+
+- comandos completos, como `/gasto 675,24 | Moradia | Condomínio`
+- fluxo guiado com teclado clicavel, escolhendo um preset e digitando apenas o valor
+
+O estado temporario do chat e as configuracoes sensiveis do bot ficam no backend em settings privados do household e nao sao expostos por `GET /api/settings`.
 
 ## Testes
 

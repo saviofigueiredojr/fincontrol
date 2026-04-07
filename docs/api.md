@@ -37,6 +37,7 @@ Receives Telegram Bot API updates.
   - `/recorrente`
   - `/cartoes`
   - `/whoami`
+- Also supports reply-keyboard flows for preset-based expense and income creation
 
 Configuration sources:
 
@@ -51,6 +52,7 @@ Configuration sources:
 Notes:
 
 - `GET /api/settings` intentionally omits these Telegram keys because they are treated as sensitive configuration
+- Temporary chat workflow state is also stored under private `telegram_*` settings and is not returned by `GET /api/settings`
 - If a chat is not authorized, the bot only returns pairing/help information and will not create transactions
 
 ## Household context

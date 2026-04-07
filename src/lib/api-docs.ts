@@ -90,7 +90,7 @@ export const apiDocs: ApiEndpointDoc[] = [
         method: "POST",
         summary: "Receber mensagens do bot",
         description:
-          "Processa comandos como /gasto, /receita, /recorrente, /cartoes e /whoami.",
+          "Processa comandos como /gasto, /receita, /recorrente, /cartoes e /whoami, além do fluxo guiado por teclado com presets clicáveis.",
         requestBody: {
           required: true,
           description: "Payload padrão do Telegram Bot API para updates de mensagem.",
