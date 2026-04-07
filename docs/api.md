@@ -22,6 +22,7 @@ NextAuth credential flow and session endpoints.
 
 - Public route
 - Used by the login screen and session management
+- Login attempts are rate-limited per `(email, ip)` and use a bcrypt dummy hash to reduce timing-based user enumeration
 
 ## Telegram bot
 
@@ -56,6 +57,16 @@ Notes:
 - `GET /api/settings` intentionally omits these Telegram keys because they are treated as sensitive configuration
 - Temporary chat workflow state is also stored under private `telegram_*` settings and is not returned by `GET /api/settings`
 - If a chat is not authorized, the bot only returns pairing/help information and will not create transactions
+
+## Cron job
+
+### `GET /api/cron/pj-retainers`
+
+Generates monthly PJ receipts for active retainers.
+
+- Public route by path, but protected by `Authorization: Bearer <CRON_SECRET>`
+- Intentionally excluded from the NextAuth middleware matcher
+- Returns `503` when `CRON_SECRET` is not configured, failing closed
 
 ## Household context
 

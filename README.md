@@ -16,6 +16,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - CI de build e tipagem para pushes e PRs
 - testes automatizados iniciais com Vitest em modulos de dominio
 - repositorio publico, com app pensado para deploy privado
+- espelho privado recomendado para deploy no Vercel quando nao houver Deployment Protection pago
 
 `package.json` continua com `"private": true` de proposito, para evitar publish acidental no npm.
 
@@ -72,9 +73,11 @@ O repositorio ja inclui uma base importante de seguranca:
 - autenticacao com NextAuth
 - senhas com bcrypt
 - middleware protegendo rotas autenticadas
+- cron isolado do middleware e protegido por `CRON_SECRET`
 - tentativas de login persistidas em banco
 - rate limit de login por email + IP
-- comparacao dummy hash para reduzir enumeracao por timing
+- comparacao com hash dummy bcrypt valido para reduzir enumeracao por timing
+- extracao de IP priorizando headers confiaveis em ambiente Vercel
 - scoping por `household` nas rotas mais importantes
 
 Ainda assim, trate o projeto como software em evolucao. Antes de expor em producao para internet aberta, vale manter revisao de seguranca, observabilidade e regressao a cada mudanca importante.
@@ -200,6 +203,16 @@ O bot do Telegram pode ser usado em dois modos:
 - fluxo guiado com teclado clicavel, escolhendo um preset e digitando apenas o valor
 
 O estado temporario do chat e as configuracoes sensiveis do bot ficam no backend em settings privados do household e nao sao expostos por `GET /api/settings`.
+
+## Repo publico, app privado
+
+Este repositorio pode continuar publico sem expor segredos, mas a recomendacao operacional atual e:
+
+- manter o codigo em `github.com/saviofigueiredojr/fincontrol`
+- usar um espelho privado para deploy, como `github.com/saviofigueiredojr/fincontrol-private`
+- configurar o projeto do Vercel para acompanhar apenas o repositorio privado
+
+Isso reduz a exposicao operacional quando o plano da Vercel nao inclui mecanismos avancados de protecao de deployment.
 
 ## Testes
 

@@ -4,6 +4,19 @@
 
 Este repositório pode ser publico, enquanto o projeto publicado no Vercel permanece privado.
 
+## Estrategia recomendada
+
+Como recursos avancados de protecao de deployment da Vercel podem depender de plano pago, a estrategia recomendada para este projeto e:
+
+1. manter o repositorio tecnico publico
+2. publicar um espelho privado para deploy
+3. conectar o projeto do Vercel apenas ao repositorio privado
+
+Exemplo de espelho:
+
+- publico: `saviofigueiredojr/fincontrol`
+- privado: `saviofigueiredojr/fincontrol-private`
+
 ## Antes de importar
 
 - tenha um banco PostgreSQL externo pronto
@@ -44,11 +57,11 @@ Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando
 
 ## Fluxo recomendado
 
-1. Importe o repositório no Vercel
-2. Marque o projeto como privado no dashboard do Vercel
-3. Configure as variaveis de ambiente de producao e preview
-4. Garanta acesso de rede entre Vercel e o PostgreSQL
-5. Faça o primeiro deploy
+1. Importe o repositorio privado no Vercel
+2. Configure as variaveis de ambiente de producao e preview
+3. Garanta acesso de rede entre Vercel e o PostgreSQL
+4. Faça o primeiro deploy
+5. Evite apontar ambientes de preview para a base real de producao
 
 ## Como o build esta preparado
 
@@ -63,7 +76,9 @@ Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando
 
 - sem `.env` commitado
 - banco de producao separado do banco local
+- banco de preview separado do banco de producao
 - `NEXTAUTH_SECRET` forte
 - seed nunca rodado em producao
 - primeiros logins testados apos o deploy
 - se usar cron, `CRON_SECRET` configurado e enviado no header `Authorization`
+- se o repo principal for publico, o Vercel deve apontar para o espelho privado

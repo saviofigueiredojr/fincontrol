@@ -30,3 +30,6 @@ Good reports usually include:
 
 - Do not include real personal or banking data in reports.
 - Keep any testing limited to environments you own or are explicitly authorized to assess.
+- Keep secrets out of Git entirely, including `.env`, CSV exports, database dumps and deployment tokens.
+- For this project, prefer a private deployment mirror repository for Vercel instead of wiring the public repository directly to production.
+- Rotate database passwords, Telegram bot tokens and other long-lived secrets after any accidental plaintext sharing.

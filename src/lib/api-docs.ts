@@ -58,7 +58,7 @@ export const apiDocs: ApiEndpointDoc[] = [
     path: "/api/auth/[...nextauth]",
     tag: "Auth",
     auth: "public",
-    description: "Endpoints gerenciados pelo NextAuth para login, sessão e CSRF.",
+    description: "Endpoints gerenciados pelo NextAuth para login, sessão e CSRF, com rate limit por email/IP e mitigação de timing-based enumeration.",
     methods: [
       {
         method: "GET",
@@ -849,15 +849,16 @@ export const apiDocs: ApiEndpointDoc[] = [
     path: "/api/cron/pj-retainers",
     tag: "Cron",
     auth: "cron",
-    description: "Gera recebíveis PJ com base em retainers ativos.",
+    description: "Gera recebíveis PJ com base em retainers ativos. A rota é excluída do middleware autenticado e protegida por bearer token próprio.",
     methods: [
       {
         method: "GET",
         summary: "Executar geração automática de PJ",
-        description: "Aceita `Authorization: Bearer <CRON_SECRET>` quando `CRON_SECRET` estiver configurado.",
+        description: "Aceita `Authorization: Bearer <CRON_SECRET>` quando `CRON_SECRET` estiver configurado. Sem essa env, a rota falha fechada com 503.",
         responses: {
           "200": "Processamento executado com sucesso.",
           "401": "Token de cron ausente ou inválido.",
+          "503": "Cron desabilitado por ausência de configuração.",
           "500": "Erro interno ao processar os retainers.",
         },
       },
