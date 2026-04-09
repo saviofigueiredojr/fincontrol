@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/saviofigueiredojr/fincontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/saviofigueiredojr/fincontrol/actions/workflows/ci.yml)
 
-Workspace de planejamento financeiro familiar construido com Next.js, Prisma e NextAuth.
+Plataforma de planejamento financeiro familiar construida com Next.js, Prisma e NextAuth.
 
 O projeto centraliza receitas, despesas, cartoes, metas, fechamento mensal e recebimentos PJ em uma unica interface. A proposta e combinar uma experiencia premium de uso com uma arquitetura pragmatica para um household pequeno, mantendo visibilidade compartilhada por padrao e privacidade seletiva quando necessario.
 
@@ -13,7 +13,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - fluxo principal funcional para uso local
 - preparado para PostgreSQL
 - compativel com deploy privado na Vercel usando PostgreSQL hospedado
-- CI de build e tipagem para pushes e PRs
+- CI de typecheck, testes e build para pushes e PRs
 - testes automatizados iniciais com Vitest em modulos de dominio
 - repositorio publico, com app pensado para deploy privado
 - espelho privado recomendado para deploy no Vercel quando nao houver Deployment Protection pago
@@ -31,7 +31,7 @@ Projeto pessoal em evolucao, publicado como portfolio tecnico e base de aprendiz
 - Divisao de despesas em modo `50/50`, proporcional ou personalizado
 - Metas financeiras com progresso e aportes
 - Fechamento e reabertura de mes
-- Gestão de faturamentos PJ em formato Kanban (Falta Emitir, Emitida, Pendente, Pago) com isolamento automático de receitas no Dashboard
+- Gestao de faturamentos PJ em formato Kanban (Falta Emitir, Emitida, Pendente, Pago) com isolamento automatico de receitas no Dashboard
 - Isolamento por `household`, com nomes exibidos dinamicamente conforme o usuario logado
 
 ## Stack
@@ -186,6 +186,8 @@ O terceiro usuario fica em outro `household` e serve para validar isolamento de 
 - `npm run build`: gera build de producao
 - `npm run start`: sobe a build
 - `npm run lint`: roda o lint do Next.js
+- `npm run test`: roda os testes com Vitest
+- `npm run test:watch`: roda os testes em modo watch
 - `npm run typecheck`: valida tipos TypeScript
 - `npm run generate`: gera o Prisma Client
 - `npm run vercel-build`: gera client, aplica migrations e faz o build pensado para Vercel
@@ -258,6 +260,8 @@ Ainda nao ha uma cobertura ampla de interface e integracao fim a fim.
 - `/api/household/context`
 - `/api/telegram/webhook`
 - `/api/cron/pj-retainers`
+- `/api/openapi`
+- `/api`
 
 Referencia detalhada de metodos, payloads e respostas:
 
