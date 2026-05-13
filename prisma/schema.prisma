@@ -16,6 +16,7 @@ model Household {
   monthCloses        MonthClose[]
   recurringTemplates RecurringTemplate[]
   settings           Setting[]
+  planningDocument   PlanningDocument?
   pjReceipts         PjReceipt[]
   pjRetainers        PjRetainer[]
   pjTaxRate          Float?              @default(6.0)
@@ -167,6 +168,16 @@ model LoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([email, ip, createdAt])
+}
+
+model PlanningDocument {
+  id          String    @id @default(cuid())
+  title       String    @default("Planejamento financeiro")
+  content     String
+  householdId String    @unique
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model PjReceipt {
