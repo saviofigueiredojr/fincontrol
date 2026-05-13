@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { refreshCardStatementTotals } from "@/lib/card-statements";
 import { shiftCompetencia } from "@/lib/utils";
 import { ImportTransactionsInput, supportedImportFormats } from "./import.schemas";
 import { FallbackCategorizerService } from "./fallback-categorizer.service";
@@ -141,32 +142,6 @@ async function getOrCreateStatement(
       status: "open",
     },
   });
-}
-
-async function refreshStatementTotals(
-  db: DatabaseClient,
-  statementIds: string[]
-) {
-  const uniqueIds = Array.from(new Set(statementIds));
-
-  await Promise.all(
-    uniqueIds.map(async (statementId) => {
-      const transactions = await db.transaction.findMany({
-        where: { cardStatementId: statementId },
-        select: { amount: true },
-      });
-
-      const totalAmount = transactions.reduce(
-        (sum, transaction) => sum + transaction.amount,
-        0
-      );
-
-      await db.cardStatement.update({
-        where: { id: statementId },
-        data: { totalAmount },
-      });
-    })
-  );
 }
 
 async function resetImportedCompetencia(
@@ -549,7 +524,7 @@ export async function importTransactionsFromStatement(
         : await importOfx(db, content, input.cardId, userId, card.name, input.competencia);
 
     statementIdsToRefresh.push(...imported.statementIds);
-    await refreshStatementTotals(db, statementIdsToRefresh);
+    await refreshCardStatementTotals(db, statementIdsToRefresh);
 
     return imported.count;
   }, { timeout: 60000 });
