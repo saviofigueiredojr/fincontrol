@@ -1,6 +1,10 @@
 import { randomUUID } from "crypto";
-import { Prisma, Transaction } from "@prisma/client";
-import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
+import { Transaction } from "@prisma/client";
+import {
+  getOrCreateCardStatement,
+  getScopedCreditCard,
+  refreshCardStatementTotals,
+} from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import {
   CreateTransactionInput,
@@ -309,13 +313,23 @@ export async function createTransactionWithInstallments(
     }
   }
 
-  return prisma.$transaction(
-    transactionsToCreate.map((transaction) =>
-      prisma.transaction.create({
+  return prisma.$transaction(async (db) => {
+    const createdTransactions = [];
+
+    for (const transaction of transactionsToCreate) {
+      const createdTransaction = await db.transaction.create({
         data: transaction,
-      })
-    )
-  );
+      });
+      createdTransactions.push(createdTransaction);
+    }
+
+    await refreshCardStatementTotals(
+      db,
+      createdTransactions.map((transaction) => transaction.cardStatementId)
+    );
+
+    return createdTransactions;
+  });
 }
 
 async function getScopedTransaction(actor: TransactionActor, transactionId: string) {
@@ -327,6 +341,7 @@ async function getScopedTransaction(actor: TransactionActor, transactionId: stri
     include: {
       cardStatement: {
         select: {
+          id: true,
           cardId: true,
         },
       },
@@ -376,9 +391,18 @@ export async function updateScopedTransaction(
         : null;
     }
 
-    const updated = await prisma.transaction.update({
-      where: { id: transactionId },
-      data,
+    const updated = await prisma.$transaction(async (db) => {
+      const updatedTransaction = await db.transaction.update({
+        where: { id: transactionId },
+        data,
+      });
+
+      await refreshCardStatementTotals(db, [
+        existing.cardStatementId,
+        updatedTransaction.cardStatementId,
+      ]);
+
+      return updatedTransaction;
     });
 
     return { kind: "ok" as const, transaction: updated };
@@ -397,6 +421,7 @@ export async function updateScopedTransaction(
       id: true,
       competencia: true,
       userId: true,
+      cardStatementId: true,
     },
   });
 
@@ -446,14 +471,7 @@ export async function updateScopedTransaction(
       : null;
   }
 
-  const operations: Prisma.PrismaPromise<unknown>[] = [
-    prisma.transaction.update({
-      where: { id: transactionId },
-      data: currentUpdateData,
-    }),
-  ];
-
-  for (const futureTransaction of futureTransactions) {
+  const futureUpdates = futureTransactions.map((futureTransaction) => {
     const futureUpdateData = buildTransactionUpdateData(
       actor,
       futureTransaction.userId,
@@ -467,25 +485,48 @@ export async function updateScopedTransaction(
         : null;
     }
 
-    operations.push(
-      prisma.transaction.update({
-        where: { id: futureTransaction.id },
-        data: futureUpdateData,
-      })
-    );
-  }
+    return {
+      id: futureTransaction.id,
+      oldCardStatementId: futureTransaction.cardStatementId,
+      data: futureUpdateData,
+    };
+  });
 
   const templateUpdateData = buildRecurringTemplateUpdateData(input);
-  if (Object.keys(templateUpdateData).length > 0) {
-    operations.push(
-      prisma.recurringTemplate.update({
+
+  const updated = await prisma.$transaction(async (db) => {
+    const affectedStatementIds: Array<string | null | undefined> = [
+      existing.cardStatementId,
+    ];
+
+    const updatedTransaction = await db.transaction.update({
+      where: { id: transactionId },
+      data: currentUpdateData,
+    });
+
+    for (const futureUpdate of futureUpdates) {
+      affectedStatementIds.push(futureUpdate.oldCardStatementId);
+
+      const futureUpdatedTransaction = await db.transaction.update({
+        where: { id: futureUpdate.id },
+        data: futureUpdate.data,
+      });
+
+      affectedStatementIds.push(futureUpdatedTransaction.cardStatementId);
+    }
+
+    if (Object.keys(templateUpdateData).length > 0) {
+      await db.recurringTemplate.update({
         where: { id: recurringId },
         data: templateUpdateData,
-      })
-    );
-  }
+      });
+    }
 
-  const [updated] = await prisma.$transaction(operations);
+    affectedStatementIds.push(updatedTransaction.cardStatementId);
+    await refreshCardStatementTotals(db, affectedStatementIds);
+
+    return updatedTransaction;
+  });
 
   return { kind: "ok" as const, transaction: updated };
 }
@@ -506,29 +547,51 @@ export async function deleteScopedTransaction(
   }
 
   if (scope === "series" && existing.isRecurring && existing.recurringId) {
-    await prisma.$transaction([
-      prisma.transaction.deleteMany({
+    const recurringId = existing.recurringId;
+    const seriesTransactions = await prisma.transaction.findMany({
+      where: {
+        recurringId,
+        userId: { in: actor.memberIds },
+      },
+      select: { cardStatementId: true },
+    });
+
+    await prisma.$transaction(async (db) => {
+      await db.transaction.deleteMany({
         where: {
-          recurringId: existing.recurringId,
+          recurringId,
           userId: { in: actor.memberIds },
         },
-      }),
-      prisma.recurringTemplate.deleteMany({
-        where: { id: existing.recurringId },
-      }),
-    ]);
+      });
+      await db.recurringTemplate.deleteMany({
+        where: { id: recurringId },
+      });
+      await refreshCardStatementTotals(
+        db,
+        seriesTransactions.map((transaction) => transaction.cardStatementId)
+      );
+    });
 
     return { kind: "ok" as const };
   }
 
-  await prisma.$transaction([
-    prisma.transaction.deleteMany({
+  const childTransactions = await prisma.transaction.findMany({
+    where: { parentId: transactionId },
+    select: { cardStatementId: true },
+  });
+
+  await prisma.$transaction(async (db) => {
+    await db.transaction.deleteMany({
       where: { parentId: transactionId },
-    }),
-    prisma.transaction.delete({
+    });
+    await db.transaction.delete({
       where: { id: transactionId },
-    }),
-  ]);
+    });
+    await refreshCardStatementTotals(db, [
+      existing.cardStatementId,
+      ...childTransactions.map((transaction) => transaction.cardStatementId),
+    ]);
+  });
 
   return { kind: "ok" as const };
 }

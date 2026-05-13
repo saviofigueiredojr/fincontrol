@@ -1,5 +1,9 @@
 import { randomUUID } from "crypto";
-import { getOrCreateCardStatement, getScopedCreditCard } from "@/lib/card-statements";
+import {
+  getOrCreateCardStatement,
+  getScopedCreditCard,
+  refreshCardStatementTotals,
+} from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
 import { shiftCompetencia } from "@/lib/utils";
 import { CreateRecurringInput } from "./recurring.schemas";
@@ -115,8 +119,8 @@ export async function createRecurringTemplate(
     cardStatementId: statementIdsByCompetencia.get(competencia) ?? null,
   }));
 
-  const [template] = await prisma.$transaction([
-    prisma.recurringTemplate.create({
+  const template = await prisma.$transaction(async (db) => {
+    const createdTemplate = await db.recurringTemplate.create({
       data: {
         id: recurringId,
         description: input.description,
@@ -133,11 +137,18 @@ export async function createRecurringTemplate(
         isActive: true,
         householdId: actor.householdId,
       },
-    }),
-    ...(transactionRows.length > 0
-      ? [prisma.transaction.createMany({ data: transactionRows })]
-      : []),
-  ]);
+    });
+
+    if (transactionRows.length > 0) {
+      await db.transaction.createMany({ data: transactionRows });
+      await refreshCardStatementTotals(
+        db,
+        transactionRows.map((transaction) => transaction.cardStatementId)
+      );
+    }
+
+    return createdTemplate;
+  });
 
   return template;
 }

@@ -49,3 +49,31 @@ export async function getOrCreateCardStatement(
     },
   });
 }
+
+export async function refreshCardStatementTotals(
+  db: DatabaseClient,
+  statementIds: Array<string | null | undefined>
+) {
+  const uniqueIds = Array.from(
+    new Set(statementIds.filter((id): id is string => Boolean(id)))
+  );
+
+  await Promise.all(
+    uniqueIds.map(async (statementId) => {
+      const transactions = await db.transaction.findMany({
+        where: { cardStatementId: statementId },
+        select: { amount: true },
+      });
+
+      const totalAmount = transactions.reduce(
+        (sum, transaction) => sum + transaction.amount,
+        0
+      );
+
+      await db.cardStatement.update({
+        where: { id: statementId },
+        data: { totalAmount },
+      });
+    })
+  );
+}
