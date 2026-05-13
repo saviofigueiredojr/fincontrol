@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
+import { getHouseholdForUser } from "@/lib/household";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = (session.user as { id: string }).id;
+    const { memberIds } = await getHouseholdForUser(userId);
     const { searchParams } = new URL(request.url);
     const competencia = searchParams.get("competencia");
 
@@ -25,10 +27,14 @@ export async function GET(request: NextRequest) {
 
     const installments = await prisma.transaction.findMany({
       where: {
-        userId,
+        userId: { in: memberIds },
         type: "expense",
         installmentTotal: { not: null },
         installmentCurrent: { not: null },
+        OR: [
+          { isSecret: false },
+          { isSecret: true, userId },
+        ],
         ...(competencia ? { competencia: { gte: competencia } } : {}),
       },
       orderBy: [{ competencia: "asc" }, { installmentCurrent: "asc" }],
