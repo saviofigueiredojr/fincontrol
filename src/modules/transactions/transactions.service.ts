@@ -471,10 +471,6 @@ export async function updateScopedTransaction(
       : null;
   }
 
-  const affectedStatementIds: Array<string | null | undefined> = [
-    existing.cardStatementId,
-  ];
-
   const futureUpdates = futureTransactions.map((futureTransaction) => {
     const futureUpdateData = buildTransactionUpdateData(
       actor,
@@ -489,10 +485,9 @@ export async function updateScopedTransaction(
         : null;
     }
 
-    affectedStatementIds.push(futureTransaction.cardStatementId);
-
     return {
       id: futureTransaction.id,
+      oldCardStatementId: futureTransaction.cardStatementId,
       data: futureUpdateData,
     };
   });
@@ -500,12 +495,18 @@ export async function updateScopedTransaction(
   const templateUpdateData = buildRecurringTemplateUpdateData(input);
 
   const updated = await prisma.$transaction(async (db) => {
+    const affectedStatementIds: Array<string | null | undefined> = [
+      existing.cardStatementId,
+    ];
+
     const updatedTransaction = await db.transaction.update({
       where: { id: transactionId },
       data: currentUpdateData,
     });
 
     for (const futureUpdate of futureUpdates) {
+      affectedStatementIds.push(futureUpdate.oldCardStatementId);
+
       const futureUpdatedTransaction = await db.transaction.update({
         where: { id: futureUpdate.id },
         data: futureUpdate.data,
