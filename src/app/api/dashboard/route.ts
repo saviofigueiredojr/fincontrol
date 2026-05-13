@@ -173,8 +173,7 @@ export async function GET(request: NextRequest) {
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
-      .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime())
-      .slice(0, 8);
+      .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
 
     // 5. Budget progress per category (household scoped)
     const budgetSettings = await prisma.setting.findMany({
