@@ -128,6 +128,7 @@ function escapeXml(value: string) {
 }
 
 function paragraph(text: string, style?: string) {
+  // Styles are trusted internal constants; user-provided values must be XML-escaped first.
   const styleXml = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : "";
   return `<w:p>${styleXml}<w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 }

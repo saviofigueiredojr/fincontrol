@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { z } from "zod";
 import { getHouseholdForUser } from "@/lib/household";
 import { getSessionUser } from "@/lib/session-user";
 import { updatePlanningDocumentSchema } from "@/modules/planning/planning.schemas";
@@ -9,8 +10,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function getValidationMessage(error: { issues?: Array<{ message?: string }> }) {
-  return error.issues?.[0]?.message ?? "Payload inválido";
+function getValidationMessage(error: z.ZodError) {
+  return error.issues[0]?.message ?? "Payload inválido";
 }
 
 export async function GET() {

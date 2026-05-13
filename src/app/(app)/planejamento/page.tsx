@@ -113,7 +113,7 @@ function formatUpdatedAt(value: string) {
 }
 
 export default function PlanejamentoPage() {
-  const [document, setDocument] = useState<PlanningDocument | null>(null);
+  const [planningDoc, setPlanningDoc] = useState<PlanningDocument | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [mode, setMode] = useState<ViewMode>("edit");
@@ -123,9 +123,9 @@ export default function PlanejamentoPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const isDirty = useMemo(() => {
-    if (!document) return false;
-    return document.title !== title || document.content !== content;
-  }, [content, document, title]);
+    if (!planningDoc) return false;
+    return planningDoc.title !== title || planningDoc.content !== content;
+  }, [content, planningDoc, title]);
 
   const fetchDocument = useCallback(async () => {
     setLoading(true);
@@ -134,7 +134,7 @@ export default function PlanejamentoPage() {
       const response = await fetch("/api/planning", { cache: "no-store" });
       if (!response.ok) throw new Error("Erro ao carregar planejamento");
       const payload = (await response.json()) as PlanningDocument;
-      setDocument(payload);
+      setPlanningDoc(payload);
       setTitle(payload.title);
       setContent(payload.content);
     } catch (err) {
@@ -164,7 +164,7 @@ export default function PlanejamentoPage() {
         throw new Error(payload.error ?? "Erro ao salvar planejamento");
       }
 
-      setDocument(payload);
+      setPlanningDoc(payload);
       setTitle(payload.title);
       setContent(payload.content);
       setMessage("Planejamento salvo no banco.");
@@ -183,7 +183,7 @@ export default function PlanejamentoPage() {
     );
   }
 
-  if (error && !document) {
+  if (error && !planningDoc) {
     return (
       <div className="flex h-96 flex-col items-center justify-center gap-4">
         <AlertCircle className="h-12 w-12 text-destructive" />
@@ -333,7 +333,7 @@ export default function PlanejamentoPage() {
               <div className="space-y-1">
                 <span className="text-muted-foreground">Última atualização</span>
                 <p className="font-medium">
-                  {document ? formatUpdatedAt(document.updatedAt) : "sem data"}
+                  {planningDoc ? formatUpdatedAt(planningDoc.updatedAt) : "sem data"}
                 </p>
               </div>
             </CardContent>

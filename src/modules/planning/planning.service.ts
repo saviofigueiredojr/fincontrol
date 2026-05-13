@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import type { UpdatePlanningDocumentInput } from "./planning.schemas";
 
+const planningDocumentSelect = {
+  id: true,
+  title: true,
+  content: true,
+  updatedAt: true,
+} as const;
+
 const DEFAULT_PLANNING_CONTENT = `# Planejamento financeiro
 
 ## Contexto
@@ -26,6 +33,7 @@ export async function getPlanningDocument(householdId: string) {
       content: DEFAULT_PLANNING_CONTENT,
     },
     update: {},
+    select: planningDocumentSelect,
   });
 }
 
@@ -44,5 +52,6 @@ export async function updatePlanningDocument(
       title: input.title,
       content: input.content,
     },
+    select: planningDocumentSelect,
   });
 }
