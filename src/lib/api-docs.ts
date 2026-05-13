@@ -190,6 +190,65 @@ export const apiDocs: ApiEndpointDoc[] = [
     ],
   },
   {
+    path: "/api/planning",
+    tag: "Planning",
+    auth: "session",
+    description:
+      "Documento vivo de planejamento financeiro do household, salvo em banco para leitura por humanos e agents.",
+    methods: [
+      {
+        method: "GET",
+        summary: "Consultar planejamento",
+        description:
+          "Retorna o documento de planejamento do household atual, criando um template inicial se ainda não existir.",
+        responses: {
+          "200": "Documento de planejamento.",
+          "401": "Sessão inválida.",
+        },
+      },
+      {
+        method: "PUT",
+        summary: "Salvar planejamento",
+        description: "Atualiza título e conteúdo Markdown do documento de planejamento.",
+        requestBody: {
+          required: true,
+          description: "Título e conteúdo do planejamento.",
+          schema: {
+            type: "object",
+            required: ["title", "content"],
+            properties: {
+              title: { type: "string", minLength: 3, maxLength: 120 },
+              content: { type: "string", minLength: 1, maxLength: 50000 },
+            },
+          },
+        },
+        responses: {
+          "200": "Documento salvo.",
+          "400": "Payload inválido.",
+          "401": "Sessão inválida.",
+        },
+      },
+    ],
+  },
+  {
+    path: "/api/planning/docx",
+    tag: "Planning",
+    auth: "session",
+    description: "Exporta o planejamento atual como arquivo DOCX.",
+    methods: [
+      {
+        method: "GET",
+        summary: "Exportar DOCX",
+        description:
+          "Gera um arquivo .docx a partir do Markdown salvo no documento de planejamento.",
+        responses: {
+          "200": "Arquivo DOCX.",
+          "401": "Sessão inválida.",
+        },
+      },
+    ],
+  },
+  {
     path: "/api/months",
     tag: "Months",
     auth: "session",
