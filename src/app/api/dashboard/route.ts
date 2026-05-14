@@ -27,6 +27,23 @@ export async function GET(request: NextRequest) {
 
     const userId = (session.user as { id: string }).id;
     const { householdId, memberIds } = await getHouseholdForUser(userId);
+    const activeIncomeTemplates = await prisma.recurringTemplate.findMany({
+      where: {
+        householdId,
+        isActive: true,
+        type: "income",
+        startDate: { lte: competencia },
+        OR: [
+          { endDate: null },
+          { endDate: { gte: competencia } },
+        ],
+      },
+      select: { amount: true },
+    });
+    const baseMonthlyIncome = activeIncomeTemplates.reduce(
+      (sum, template) => sum + template.amount,
+      0
+    );
 
     // 1. Totals for the given competencia
     // Visibility: household members only, excluding partner's secret transactions
@@ -255,8 +272,9 @@ export async function GET(request: NextRequest) {
     const meta = reserveGoal ? {
       current: reserveGoal.currentAmount,
       target: reserveGoal.targetAmount,
-      percentage: reserveGoal.targetAmount > 0 ? (reserveGoal.currentAmount / reserveGoal.targetAmount) * 100 : 0
-    } : { current: 0, target: 0, percentage: 0 };
+      percentage: reserveGoal.targetAmount > 0 ? (reserveGoal.currentAmount / reserveGoal.targetAmount) * 100 : 0,
+      deadline: reserveGoal.deadline
+    } : { current: 0, target: 0, percentage: 0, deadline: null };
 
     // Calcula o lifespan baseado na média real de despesas dos últimos meses capturados no chartData
     const last6MonthsExpenses = chartData.map(c => c.expense);
@@ -270,6 +288,7 @@ export async function GET(request: NextRequest) {
       topCategories,
       topIncomeCategories,
       activeInstallments,
+      baseMonthlyIncome,
       budgetProgress,
       meta: { ...meta, lifespan }
     });

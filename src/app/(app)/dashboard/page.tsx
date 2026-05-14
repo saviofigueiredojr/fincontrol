@@ -21,6 +21,8 @@ import {
   TrendingDown,
   Wallet,
   Target,
+  Gauge,
+  PiggyBank,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -43,7 +45,8 @@ interface DashboardData {
   receitas: number;
   despesas: number;
   saldo: number;
-  meta: { current: number; target: number; percentage: number; lifespan?: number };
+  baseMonthlyIncome: number;
+  meta: { current: number; target: number; percentage: number; lifespan?: number; deadline?: string | null };
   chartData: { competencia: string; label: string; receitas: number; despesas: number; saldo: number }[];
   despesasPorCategoria: { name: string; value: number }[];
   receitasPorCategoria: { name: string; value: number }[];
@@ -76,6 +79,104 @@ const PIE_COLORS = ["#334155", "#0f766e", "#7c3f00", "#a16207", "#475569", "#6d2
 function toFiniteNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function clampPercentage(value: number): number {
+  return Math.min(Math.max(value, 0), 100);
+}
+
+function getInstallmentHealth(ratio: number) {
+  if (ratio <= 10) {
+    return {
+      label: "Confortavel",
+      helper: "Parcelas ocupam uma fatia pequena da renda fixa.",
+      badgeVariant: "success" as const,
+      indicatorClassName: "bg-gradient-to-r from-emerald-500 to-emerald-400",
+      textClassName: "text-emerald-700 dark:text-emerald-300",
+    };
+  }
+
+  if (ratio <= 15) {
+    return {
+      label: "Saudavel, com atencao",
+      helper: "Ainda cabe bem no orcamento, mas novas parcelas devem ser intencionais.",
+      badgeVariant: "warning" as const,
+      indicatorClassName: "bg-gradient-to-r from-amber-500 to-amber-300",
+      textClassName: "text-amber-700 dark:text-amber-300",
+    };
+  }
+
+  if (ratio <= 20) {
+    return {
+      label: "Zona amarela",
+      helper: "Vale evitar novas parcelas ate algumas atuais terminarem.",
+      badgeVariant: "warning" as const,
+      indicatorClassName: "bg-gradient-to-r from-orange-500 to-amber-400",
+      textClassName: "text-orange-700 dark:text-orange-300",
+    };
+  }
+
+  return {
+    label: "Pressionado",
+    helper: "Parcelas ja pesam bastante. Priorize quitar ou pausar novas compras.",
+    badgeVariant: "destructive" as const,
+    indicatorClassName: "bg-gradient-to-r from-rose-600 to-orange-500",
+    textClassName: "text-rose-700 dark:text-rose-300",
+  };
+}
+
+function getSavingHealth(percentage: number) {
+  if (percentage >= 100) {
+    return {
+      label: "Meta batida",
+      helper: "Reserva completa. O foco pode migrar para manutencao e novos objetivos.",
+      badgeVariant: "success" as const,
+      indicatorClassName: "bg-gradient-to-r from-emerald-600 to-teal-400",
+      textClassName: "text-emerald-700 dark:text-emerald-300",
+    };
+  }
+
+  if (percentage >= 50) {
+    return {
+      label: "Bem encaminhada",
+      helper: "Mais da metade da reserva ja esta protegendo voces.",
+      badgeVariant: "success" as const,
+      indicatorClassName: "bg-gradient-to-r from-emerald-500 to-lime-400",
+      textClassName: "text-emerald-700 dark:text-emerald-300",
+    };
+  }
+
+  if (percentage > 0) {
+    return {
+      label: "Em construcao",
+      helper: "Cada aporte aumenta o tempo de seguranca da casa.",
+      badgeVariant: "warning" as const,
+      indicatorClassName: "bg-gradient-to-r from-sky-500 to-emerald-400",
+      textClassName: "text-sky-700 dark:text-sky-300",
+    };
+  }
+
+  return {
+    label: "Comecando",
+    helper: "O primeiro aporte e o mais importante para virar a chave.",
+    badgeVariant: "outline" as const,
+    indicatorClassName: "bg-gradient-to-r from-slate-500 to-slate-400",
+    textClassName: "text-muted-foreground",
+  };
+}
+
+function monthsUntilDeadline(deadline?: string | null): number | null {
+  if (!deadline) return null;
+  const target = new Date(deadline);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const now = new Date();
+  const months =
+    (target.getFullYear() - now.getFullYear()) * 12 +
+    (target.getMonth() - now.getMonth()) +
+    (target.getDate() >= now.getDate() ? 1 : 0);
+
+  return Math.max(months, 0);
 }
 
 function normalizeDashboardData(payload: any): DashboardData {
@@ -169,11 +270,13 @@ function normalizeDashboardData(payload: any): DashboardData {
     receitas,
     despesas,
     saldo,
+    baseMonthlyIncome: toFiniteNumber(payload?.baseMonthlyIncome),
     meta: {
       current: metaCurrent,
       target: metaTarget,
       percentage: metaPercentage,
       lifespan: toFiniteNumber(payload?.meta?.lifespan),
+      deadline: payload?.meta?.deadline ? String(payload.meta.deadline) : null,
     },
     chartData,
     despesasPorCategoria,
@@ -251,6 +354,21 @@ export default function DashboardPage() {
     (sum, parcela) => sum + parcela.amount,
     0
   );
+  const rendaBase = data.baseMonthlyIncome > 0 ? data.baseMonthlyIncome : data.receitas;
+  const percentualParcelas = rendaBase > 0 ? (totalParcelasAtivas / rendaBase) * 100 : 0;
+  const saldoParceladoRestante = data.parcelasAtivas.reduce((sum, parcela) => {
+    const parcelasRestantes = Math.max(
+      parcela.totalInstallments - parcela.currentInstallment + 1,
+      0
+    );
+    return sum + parcela.amount * parcelasRestantes;
+  }, 0);
+  const installmentHealth = getInstallmentHealth(percentualParcelas);
+  const savingHealth = getSavingHealth(data.meta.percentage);
+  const valorFaltanteReserva = Math.max(data.meta.target - data.meta.current, 0);
+  const mesesAteMeta = monthsUntilDeadline(data.meta.deadline);
+  const aporteMensalSugerido =
+    mesesAteMeta && mesesAteMeta > 0 ? valorFaltanteReserva / mesesAteMeta : 0;
 
   const customTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
@@ -363,6 +481,114 @@ export default function DashboardPage() {
                 <span className="font-medium text-emerald-600 dark:text-emerald-400">
                   ~ {data.meta.lifespan} meses de fôlego
                 </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Gauge className="h-5 w-5 text-primary" />
+                  Regua de Parcelamento
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Comprometimento mensal das parcelas sobre a renda fixa cadastrada.
+                </p>
+              </div>
+              <Badge variant={installmentHealth.badgeVariant}>{installmentHealth.label}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className={`text-3xl font-semibold ${installmentHealth.textClassName}`}>
+                  {percentualParcelas.toFixed(1)}%
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatCurrency(totalParcelasAtivas)} / mes em parcelas
+                </p>
+              </div>
+              <div className="text-left text-xs text-muted-foreground sm:text-right">
+                <p>Renda base: {formatCurrency(rendaBase)}</p>
+                <p>Saldo parcelado: {formatCurrency(saldoParceladoRestante)}</p>
+              </div>
+            </div>
+
+            <div>
+              <Progress
+                value={clampPercentage((percentualParcelas / 20) * 100)}
+                indicatorClassName={installmentHealth.indicatorClassName}
+              />
+              <div className="mt-2 grid grid-cols-4 text-[11px] text-muted-foreground">
+                <span>0%</span>
+                <span className="text-center">10%</span>
+                <span className="text-center">15%</span>
+                <span className="text-right">20%+</span>
+              </div>
+            </div>
+
+            <p className="rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+              {installmentHealth.helper}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <PiggyBank className="h-5 w-5 text-primary" />
+                  Regua de Saving
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Progresso da reserva de emergencia conforme os aportes forem lancados.
+                </p>
+              </div>
+              <Badge variant={savingHealth.badgeVariant}>{savingHealth.label}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className={`text-3xl font-semibold ${savingHealth.textClassName}`}>
+                  {data.meta.percentage.toFixed(1)}%
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatCurrency(data.meta.current)} guardados
+                </p>
+              </div>
+              <div className="text-left text-xs text-muted-foreground sm:text-right">
+                <p>Meta: {formatCurrency(data.meta.target)}</p>
+                <p>Faltam: {formatCurrency(valorFaltanteReserva)}</p>
+              </div>
+            </div>
+
+            <div>
+              <Progress
+                value={clampPercentage(data.meta.percentage)}
+                indicatorClassName={savingHealth.indicatorClassName}
+              />
+              <div className="mt-2 grid grid-cols-5 text-[11px] text-muted-foreground">
+                <span>0%</span>
+                <span className="text-center">25%</span>
+                <span className="text-center">50%</span>
+                <span className="text-center">75%</span>
+                <span className="text-right">100%</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+              <p>{savingHealth.helper}</p>
+              {mesesAteMeta !== null && mesesAteMeta > 0 && data.meta.target > 0 && (
+                <p className="mt-1">
+                  Ritmo ate a meta: {formatCurrency(aporteMensalSugerido)} / mes por {mesesAteMeta} meses.
+                </p>
               )}
             </div>
           </CardContent>
