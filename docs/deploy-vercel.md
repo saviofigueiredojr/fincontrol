@@ -91,11 +91,13 @@ PLUGGY_CLIENT_SECRET=
 PLUGGY_ENV=production
 PLUGGY_BASE_URL=https://api.pluggy.ai
 PLUGGY_ITEM_IDS=
+PLUGGY_TRANSACTIONS_FROM=2026-06-01
 PLUGGY_WEBHOOK_SECRET=
 ```
 
 Notas:
 
 - `PLUGGY_ITEM_IDS` aceita multiplos ids separados por virgula.
+- `PLUGGY_TRANSACTIONS_FROM` evita backfill historico no primeiro sync; ajuste para a data desejada.
 - `PLUGGY_WEBHOOK_SECRET` e recomendado se `/api/pluggy/webhook` for configurado no painel da Pluggy.
-- A integracao e review-first: sincronizar nao cria lancamentos automaticamente.
+- Despesas de cartoes vinculados entram automaticamente no orcamento durante o sync. A fila manual fica para excecoes.

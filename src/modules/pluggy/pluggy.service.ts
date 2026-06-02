@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { env } from "@/lib/env";
 import { getOrCreateCardStatement, getScopedCreditCard, refreshCardStatementTotals } from "@/lib/card-statements";
 import { prisma } from "@/lib/prisma";
-import { shiftCompetencia } from "@/lib/utils";
+import { normalizeCategoryKey, shiftCompetencia } from "@/lib/utils";
 import type { TransactionActor } from "@/modules/transactions/transactions.service";
 import {
   getPluggyItem,
@@ -30,6 +30,12 @@ export function getConfiguredPluggyItemIds() {
     .split(",")
     .map((itemId) => itemId.trim())
     .filter(Boolean);
+}
+
+function getTransactionsSyncOptions() {
+  return env.PLUGGY_TRANSACTIONS_FROM
+    ? { dateFrom: env.PLUGGY_TRANSACTIONS_FROM }
+    : {};
 }
 
 export function inferTransactionType(transaction: Pick<PluggyTransactionResponse, "amount" | "type">) {
@@ -189,6 +195,62 @@ async function upsertAccount(itemId: string, account: PluggyAccountResponse) {
   return existing ? "updated" : "created";
 }
 
+async function autoLinkCreditCardAccount(actor: PluggyActor, account: PluggyAccountResponse) {
+  if (account.type?.toUpperCase() !== "CREDIT") {
+    return null;
+  }
+
+  const pluggyAccount = await prisma.pluggyAccount.findUnique({
+    where: { pluggyAccountId: account.id },
+    select: { linkedCreditCardId: true },
+  });
+
+  if (pluggyAccount?.linkedCreditCardId) {
+    return pluggyAccount.linkedCreditCardId;
+  }
+
+  const accountTokens = [
+    account.name,
+    account.marketingName,
+    account.number,
+    account.owner,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeCategoryKey)
+    .filter(Boolean);
+
+  if (accountTokens.length === 0) {
+    return null;
+  }
+
+  const cards = await prisma.creditCard.findMany({
+    where: { userId: { in: actor.memberIds } },
+    select: { id: true, name: true, bank: true },
+  });
+
+  const matches = cards.filter((card) => {
+    const cardTokens = [card.name, card.bank].map(normalizeCategoryKey);
+
+    return cardTokens.some((cardToken) =>
+      accountTokens.some(
+        (accountToken) =>
+          accountToken.includes(cardToken) || cardToken.includes(accountToken)
+      )
+    );
+  });
+
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  await prisma.pluggyAccount.update({
+    where: { pluggyAccountId: account.id },
+    data: { linkedCreditCardId: matches[0].id },
+  });
+
+  return matches[0].id;
+}
+
 async function upsertBill(accountId: string, bill: PluggyBillResponse) {
   const existing = await prisma.pluggyBill.findUnique({
     where: { pluggyBillId: bill.id },
@@ -251,13 +313,16 @@ async function upsertStagedTransaction(actor: PluggyActor, accountId: string, tr
     duplicateReason,
   };
 
-  await prisma.pluggyTransaction.upsert({
+  const staged = await prisma.pluggyTransaction.upsert({
     where: { pluggyTransactionId: transaction.id },
     create: { pluggyTransactionId: transaction.id, ...data },
     update: data,
   });
 
-  return existing ? "updated" : "created";
+  return {
+    id: staged.id,
+    state: existing ? ("updated" as const) : ("created" as const),
+  };
 }
 
 export async function registerPluggyItem(actor: PluggyActor, itemId: string) {
@@ -299,6 +364,7 @@ export async function syncPluggyItem(actor: PluggyActor, itemId: string) {
   let createdBills = 0;
   let createdTxs = 0;
   let updatedTxs = 0;
+  let autoImportedTxs = 0;
 
   try {
     const accounts = await listPluggyAccounts(itemId);
@@ -306,6 +372,7 @@ export async function syncPluggyItem(actor: PluggyActor, itemId: string) {
     for (const account of accounts) {
       const accountResult = await upsertAccount(itemId, account);
       if (accountResult === "created") createdAccounts += 1;
+      await autoLinkCreditCardAccount(actor, account);
 
       if (account.type?.toUpperCase() === "CREDIT") {
         try {
@@ -319,12 +386,16 @@ export async function syncPluggyItem(actor: PluggyActor, itemId: string) {
         }
       }
 
-      const transactions = await listPluggyTransactions(account.id);
+      const transactions = await listPluggyTransactions(account.id, getTransactionsSyncOptions());
+      const stagedIds: string[] = [];
       for (const transaction of transactions) {
         const transactionResult = await upsertStagedTransaction(actor, account.id, transaction);
-        if (transactionResult === "created") createdTxs += 1;
+        stagedIds.push(transactionResult.id);
+
+        if (transactionResult.state === "created") createdTxs += 1;
         else updatedTxs += 1;
       }
+      autoImportedTxs += await autoImportCreditCardTransactions(actor, stagedIds);
     }
 
     const refreshedItem = await getPluggyItem(itemId);
@@ -334,7 +405,7 @@ export async function syncPluggyItem(actor: PluggyActor, itemId: string) {
       where: { id: log.id },
       data: {
         status: "success",
-        message: "Sincronização concluída",
+        message: `Sincronização concluída. ${autoImportedTxs} transação(ões) de cartão importada(s) automaticamente.`,
         finishedAt: new Date(),
         createdAccounts,
         createdBills,
@@ -537,6 +608,104 @@ async function resolveStatementForImportedTransaction(
   return { statementId: statement.id, competencia };
 }
 
+export function canAutoImportStagedTransaction(staged: {
+  importedTransactionId: string | null;
+  ignoredAt: Date | null;
+  suggestedType: string | null;
+  account: {
+    type: string;
+    linkedCreditCardId: string | null;
+  };
+}) {
+  return (
+    staged.account.type?.toUpperCase() === "CREDIT" &&
+    Boolean(staged.account.linkedCreditCardId) &&
+    staged.importedTransactionId === null &&
+    staged.ignoredAt === null &&
+    staged.suggestedType === "expense"
+  );
+}
+
+async function createTransactionFromStaged(
+  db: Prisma.TransactionClient,
+  actor: PluggyActor,
+  staged: {
+    id: string;
+    date: Date;
+    description: string;
+    amount: number;
+    suggestedType: string | null;
+    suggestedCategory: string | null;
+    suggestedCompetencia: string | null;
+    account: {
+      type: string;
+      linkedCreditCardId: string | null;
+    };
+  },
+  ownership: ImportPluggyTransactionsInput["ownership"]
+) {
+  const statement = await resolveStatementForImportedTransaction(db, staged);
+  const competencia = statement?.competencia ?? staged.suggestedCompetencia ?? dateToCompetencia(staged.date);
+  const ownerUserId = getOwnerUserId(actor, ownership);
+
+  const created = await db.transaction.create({
+    data: {
+      date: staged.date,
+      competencia,
+      description: staged.description,
+      category: staged.suggestedCategory ?? "Outros",
+      amount: staged.amount,
+      type: staged.suggestedType ?? "expense",
+      ownership,
+      isSecret: false,
+      source: "pluggy",
+      userId: ownerUserId,
+      cardStatementId: statement?.statementId ?? null,
+    },
+  });
+
+  await db.pluggyTransaction.update({
+    where: { id: staged.id },
+    data: { importedTransactionId: created.id },
+  });
+
+  return created;
+}
+
+async function autoImportCreditCardTransactions(actor: PluggyActor, stagedIds: string[]) {
+  if (stagedIds.length === 0) {
+    return 0;
+  }
+
+  const stagedTransactions = await prisma.pluggyTransaction.findMany({
+    where: {
+      id: { in: stagedIds },
+      account: { item: { householdId: actor.householdId } },
+    },
+    include: { account: true },
+    orderBy: { date: "asc" },
+  });
+
+  const importable = stagedTransactions.filter(canAutoImportStagedTransaction);
+
+  if (importable.length === 0) {
+    return 0;
+  }
+
+  return prisma.$transaction(async (db) => {
+    const affectedStatementIds: Array<string | null | undefined> = [];
+
+    for (const staged of importable) {
+      const created = await createTransactionFromStaged(db, actor, staged, "joint");
+      affectedStatementIds.push(created.cardStatementId);
+    }
+
+    await refreshCardStatementTotals(db, affectedStatementIds);
+
+    return importable.length;
+  });
+}
+
 export async function importPluggyTransactions(actor: PluggyActor, input: ImportPluggyTransactionsInput) {
   const stagedTransactions = await prisma.pluggyTransaction.findMany({
     where: {
@@ -553,37 +722,12 @@ export async function importPluggyTransactions(actor: PluggyActor, input: Import
     throw new Error("Uma ou mais transações não estão disponíveis para importação");
   }
 
-  const ownerUserId = getOwnerUserId(actor, input.ownership);
-
   return prisma.$transaction(async (db) => {
     const imported = [];
     const affectedStatementIds: Array<string | null | undefined> = [];
 
     for (const staged of stagedTransactions) {
-      const statement = await resolveStatementForImportedTransaction(db, staged);
-      const competencia = statement?.competencia ?? staged.suggestedCompetencia ?? dateToCompetencia(staged.date);
-
-      const created = await db.transaction.create({
-        data: {
-          date: staged.date,
-          competencia,
-          description: staged.description,
-          category: staged.suggestedCategory ?? "Outros",
-          amount: staged.amount,
-          type: staged.suggestedType ?? "expense",
-          ownership: input.ownership,
-          isSecret: false,
-          source: "pluggy",
-          userId: ownerUserId,
-          cardStatementId: statement?.statementId ?? null,
-        },
-      });
-
-      await db.pluggyTransaction.update({
-        where: { id: staged.id },
-        data: { importedTransactionId: created.id },
-      });
-
+      const created = await createTransactionFromStaged(db, actor, staged, input.ownership);
       affectedStatementIds.push(created.cardStatementId);
       imported.push(created);
     }

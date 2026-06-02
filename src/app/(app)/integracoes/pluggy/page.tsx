@@ -180,7 +180,7 @@ export default function PluggyIntegrationPage() {
         body: JSON.stringify({ itemId }),
       });
       setItemId("");
-      setMessage("Conexão cadastrada. Rode a sincronização para carregar contas e lançamentos.");
+      setMessage("Conexão cadastrada. Rode a sincronização para carregar contas, saldos e importar cartões vinculados.");
       await loadOverview();
     });
   }
@@ -192,7 +192,7 @@ export default function PluggyIntegrationPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(itemIdToSync ? { itemId: itemIdToSync } : {}),
       });
-      setMessage("Sincronização concluída. Revise as pendências antes de importar.");
+      setMessage("Sincronização concluída. Cartões vinculados foram importados automaticamente; revise apenas as exceções pendentes.");
       await Promise.all([loadOverview(), loadCandidates()]);
     });
   }
@@ -268,7 +268,7 @@ export default function PluggyIntegrationPage() {
           <p className="text-sm font-medium uppercase tracking-[0.24em] text-muted-foreground">Integrações</p>
           <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">Pluggy / Meu Pluggy</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-            Sincronize internet banking em uma fila de revisão. Nada entra no orçamento sem importação manual.
+            Sincronize cartões de crédito direto no orçamento e mantenha saldos de contas atualizados. A fila fica para exceções que exigem revisão.
           </p>
         </div>
         <Button onClick={() => sync()} disabled={busy !== null || !overview?.configured}>
@@ -315,7 +315,7 @@ export default function PluggyIntegrationPage() {
             <CardDescription>Pendentes</CardDescription>
             <CardTitle>{overview?.counts.pending ?? 0}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">Transações em staging aguardando revisão.</CardContent>
+          <CardContent className="text-xs text-muted-foreground">Exceções pendentes: sem vínculo, estorno ou item que exige revisão.</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
@@ -351,7 +351,7 @@ export default function PluggyIntegrationPage() {
         <Card>
           <CardHeader>
             <CardTitle>Conexões e contas</CardTitle>
-            <CardDescription>Vincule contas tipo cartão ao cartão cadastrado no FinControl antes de importar.</CardDescription>
+            <CardDescription>Vincule contas tipo cartão ao cartão cadastrado no FinControl. Depois disso, o sync importa novas despesas automaticamente.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {overview?.items.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma conexão registrada ainda.</p>}
@@ -451,7 +451,7 @@ export default function PluggyIntegrationPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <CardTitle>Fila de importação</CardTitle>
-              <CardDescription>Revise antes de transformar staging em lançamentos reais.</CardDescription>
+              <CardDescription>Cartões vinculados entram direto; esta fila mostra exceções, ignoradas e histórico importado.</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select

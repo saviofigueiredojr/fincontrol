@@ -23,6 +23,7 @@ const envSchema = z.object({
   PLUGGY_ENV: z.enum(["sandbox", "production", "development"]).optional(),
   PLUGGY_BASE_URL: z.string().url().optional(),
   PLUGGY_ITEM_IDS: z.string().min(1).optional(),
+  PLUGGY_TRANSACTIONS_FROM: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   PLUGGY_WEBHOOK_SECRET: z.string().min(16).optional(),
 });
 
@@ -41,6 +42,7 @@ const parsedEnv = envSchema.safeParse({
   PLUGGY_ENV: process.env.PLUGGY_ENV,
   PLUGGY_BASE_URL: process.env.PLUGGY_BASE_URL,
   PLUGGY_ITEM_IDS: process.env.PLUGGY_ITEM_IDS,
+  PLUGGY_TRANSACTIONS_FROM: process.env.PLUGGY_TRANSACTIONS_FROM,
   PLUGGY_WEBHOOK_SECRET: process.env.PLUGGY_WEBHOOK_SECRET,
 });
 

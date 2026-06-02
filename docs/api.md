@@ -516,7 +516,7 @@ Query params:
 
 ### `POST /api/pluggy/candidates`
 
-Imports selected staged transactions into the main `Transaction` table.
+Imports selected staged exception transactions into the main `Transaction` table. Credit-card expenses from linked accounts are normally imported during sync.
 
 Body:
 
@@ -546,4 +546,4 @@ Receives Pluggy webhook events.
 
 - Public route by path.
 - If `PLUGGY_WEBHOOK_SECRET` is set, requires the same value through `x-pluggy-webhook-secret`, `x-webhook-secret`, bearer token, or `?secret=`.
-- Current implementation acknowledges and logs the event; imports remain review-first.
+- Current implementation acknowledges and logs the event; direct sync is still triggered manually/API-side.

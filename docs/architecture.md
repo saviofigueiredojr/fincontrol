@@ -120,9 +120,9 @@ Owns Pluggy / Meu Pluggy integration concerns:
 
 - API authentication and key caching
 - item/account/bill/transaction synchronization
-- staging imported bank data before it reaches the main budget
+- staging imported bank data for auditability
 - account-to-credit-card linking
-- duplicate hints before manual import
-- selected transaction import into `Transaction`
+- direct import of linked credit-card expenses into `Transaction`
+- exception review for unlinked accounts, card credits/refunds and manual edge cases
 
-This module intentionally keeps the integration review-first: external banking data is stored in `Pluggy*` tables and only becomes a real budget transaction after explicit user action.
+This module treats Pluggy as the source of truth for linked credit-card expenses. Banking account balances are synchronized, while payment/transfer reconciliation remains a later step.
