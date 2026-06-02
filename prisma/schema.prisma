@@ -17,6 +17,7 @@ model Household {
   recurringTemplates RecurringTemplate[]
   settings           Setting[]
   planningDocument   PlanningDocument?
+  pluggyItems        PluggyItem[]
   pjReceipts         PjReceipt[]
   pjRetainers        PjRetainer[]
   pjTaxRate          Float?              @default(6.0)
@@ -35,12 +36,13 @@ model User {
   transactions Transaction[]
   creditCards  CreditCard[]
   pjReceipts   PjReceipt[]
+  pluggyItems  PluggyItem[]
 
   @@index([householdId])
 }
 
 model Transaction {
-  id                 String         @id @default(cuid())
+  id                 String              @id @default(cuid())
   date               DateTime
   competencia        String // YYYY-MM (mês de competência)
   description        String
@@ -48,8 +50,8 @@ model Transaction {
   amount             Float // sempre positivo
   type               String // income | expense | transfer
   ownership          String // mine | partner | joint
-  isSecret           Boolean        @default(false) // oculta do parceiro
-  isRecurring        Boolean        @default(false)
+  isSecret           Boolean             @default(false) // oculta do parceiro
+  isRecurring        Boolean             @default(false)
   recurringId        String? // agrupa recorrentes
   installmentCurrent Int? // parcela atual (1, 2, 3...)
   installmentTotal   Int? // total de parcelas
@@ -57,11 +59,12 @@ model Transaction {
   source             String? // manual | csv_inter | ofx | recurring
   cardStatementId    String?
   userId             String
-  user               User           @relation(fields: [userId], references: [id])
-  cardStatement      CardStatement? @relation(fields: [cardStatementId], references: [id])
+  user               User                @relation(fields: [userId], references: [id])
+  cardStatement      CardStatement?      @relation(fields: [cardStatementId], references: [id])
   pjReceipt          PjReceipt?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  pluggyImports      PluggyTransaction[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([competencia])
   @@index([userId])
@@ -70,15 +73,16 @@ model Transaction {
 }
 
 model CreditCard {
-  id         String          @id @default(cuid())
-  name       String // "Inter", "Nubank", etc.
-  bank       String
-  closingDay Int // dia de fechamento da fatura
-  dueDay     Int // dia de vencimento
-  userId     String
-  user       User            @relation(fields: [userId], references: [id])
-  statements CardStatement[]
-  createdAt  DateTime        @default(now())
+  id             String          @id @default(cuid())
+  name           String // "Inter", "Nubank", etc.
+  bank           String
+  closingDay     Int // dia de fechamento da fatura
+  dueDay         Int // dia de vencimento
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  statements     CardStatement[]
+  pluggyAccounts PluggyAccount[]
+  createdAt      DateTime        @default(now())
 }
 
 model CardStatement {
@@ -92,6 +96,128 @@ model CardStatement {
   createdAt    DateTime      @default(now())
 
   @@unique([cardId, competencia])
+}
+
+model PluggyItem {
+  id              String          @id @default(cuid())
+  pluggyItemId    String          @unique
+  connectorId     Int?
+  connectorName   String?
+  status          String?
+  executionStatus String?
+  errorCode       String?
+  errorMessage    String?
+  lastUpdatedAt   DateTime?
+  lastSyncedAt    DateTime?
+  raw             Json?
+  householdId     String
+  household       Household       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User            @relation(fields: [userId], references: [id])
+  accounts        PluggyAccount[]
+  syncLogs        PluggySyncLog[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([householdId])
+  @@index([userId])
+  @@index([status])
+}
+
+model PluggyAccount {
+  id                 String              @id @default(cuid())
+  pluggyAccountId    String              @unique
+  pluggyItemId       String
+  item               PluggyItem          @relation(fields: [pluggyItemId], references: [pluggyItemId], onDelete: Cascade)
+  type               String
+  subtype            String?
+  name               String
+  marketingName      String?
+  number             String?
+  owner              String?
+  currencyCode       String?
+  balance            Float?
+  creditLimit        Float?
+  linkedCreditCardId String?
+  linkedCreditCard   CreditCard?         @relation(fields: [linkedCreditCardId], references: [id], onDelete: SetNull)
+  raw                Json?
+  transactions       PluggyTransaction[]
+  bills              PluggyBill[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([pluggyItemId])
+  @@index([linkedCreditCardId])
+  @@index([type])
+}
+
+model PluggyBill {
+  id              String        @id @default(cuid())
+  pluggyBillId    String        @unique
+  pluggyAccountId String
+  account         PluggyAccount @relation(fields: [pluggyAccountId], references: [pluggyAccountId], onDelete: Cascade)
+  dueDate         DateTime?
+  closeDate       DateTime?
+  totalAmount     Float?
+  minimumPayment  Float?
+  status          String?
+  raw             Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([pluggyAccountId])
+  @@index([dueDate])
+}
+
+model PluggyTransaction {
+  id                    String        @id @default(cuid())
+  pluggyTransactionId   String        @unique
+  pluggyAccountId       String
+  account               PluggyAccount @relation(fields: [pluggyAccountId], references: [pluggyAccountId], onDelete: Cascade)
+  importedTransactionId String?
+  importedTransaction   Transaction?  @relation(fields: [importedTransactionId], references: [id])
+  date                  DateTime
+  description           String
+  amount                Float
+  type                  String?
+  status                String?
+  category              String?
+  categoryId            String?
+  merchantName          String?
+  paymentData           Json?
+  creditCardMetadata    Json?
+  raw                   Json?
+  suggestedType         String?
+  suggestedCategory     String?
+  suggestedCompetencia  String?
+  duplicateReason       String?
+  ignoredAt             DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([pluggyAccountId])
+  @@index([date])
+  @@index([importedTransactionId])
+  @@index([ignoredAt])
+}
+
+model PluggySyncLog {
+  id              String      @id @default(cuid())
+  pluggyItemId    String?
+  item            PluggyItem? @relation(fields: [pluggyItemId], references: [pluggyItemId], onDelete: SetNull)
+  pluggyAccountId String?
+  status          String
+  message         String?
+  startedAt       DateTime    @default(now())
+  finishedAt      DateTime?
+  createdAccounts Int         @default(0)
+  createdBills    Int         @default(0)
+  createdTxs      Int         @default(0)
+  updatedTxs      Int         @default(0)
+
+  @@index([pluggyItemId])
+  @@index([pluggyAccountId])
+  @@index([status])
 }
 
 model MonthClose {
@@ -213,8 +339,8 @@ model PjRetainer {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  household   Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  receipts    PjReceipt[]
+  household Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  receipts  PjReceipt[]
 
   @@index([householdId])
 }

@@ -82,3 +82,20 @@ Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando
 - primeiros logins testados apos o deploy
 - se usar cron, `CRON_SECRET` configurado e enviado no header `Authorization`
 - se o repo principal for publico, o Vercel deve apontar para o espelho privado
+
+## Variaveis opcionais Pluggy
+
+```env
+PLUGGY_CLIENT_ID=
+PLUGGY_CLIENT_SECRET=
+PLUGGY_ENV=production
+PLUGGY_BASE_URL=https://api.pluggy.ai
+PLUGGY_ITEM_IDS=
+PLUGGY_WEBHOOK_SECRET=
+```
+
+Notas:
+
+- `PLUGGY_ITEM_IDS` aceita multiplos ids separados por virgula.
+- `PLUGGY_WEBHOOK_SECRET` e recomendado se `/api/pluggy/webhook` for configurado no painel da Pluggy.
+- A integracao e review-first: sincronizar nao cria lancamentos automaticamente.

@@ -13,6 +13,7 @@ import {
   CalendarCheck,
   Briefcase,
   FileText,
+  Link2,
   Sun,
   Moon,
   LogOut,
@@ -31,6 +32,7 @@ const navItems = [
   { href: "/fechar-mes", label: "Fechar Mês", icon: CalendarCheck },
   { href: "/creditos", label: "Créditos PJ", icon: Briefcase },
   { href: "/planejamento", label: "Planejamento", icon: FileText },
+  { href: "/integracoes/pluggy", label: "Pluggy", icon: Link2 },
 ];
 
 export function Sidebar() {

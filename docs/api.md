@@ -450,3 +450,100 @@ Response shape:
 ```json
 { "success": true, "generated": 0 }
 ```
+
+## Pluggy / Meu Pluggy
+
+### `GET /api/pluggy`
+
+Returns Pluggy integration overview for the current household.
+
+Response includes:
+
+- configuration status
+- registered items
+- synced accounts
+- pending/imported/ignored transaction counts
+- latest sync logs
+
+### `POST /api/pluggy`
+
+Registers a Pluggy `itemId` for the current household.
+
+Body:
+
+```json
+{ "itemId": "pluggy-item-id" }
+```
+
+### `POST /api/pluggy/sync`
+
+Synchronizes one item or all registered items.
+
+Body for one item:
+
+```json
+{ "itemId": "pluggy-item-id" }
+```
+
+Body for all items:
+
+```json
+{}
+```
+
+### `PATCH /api/pluggy/accounts`
+
+Links a Pluggy account to a FinControl credit card.
+
+Body:
+
+```json
+{
+  "pluggyAccountId": "pluggy-account-id",
+  "linkedCreditCardId": "credit-card-id-or-null"
+}
+```
+
+### `GET /api/pluggy/candidates`
+
+Lists staged Pluggy transactions.
+
+Query params:
+
+- `status`: `pending`, `imported`, `ignored` or `all`
+- `accountId`: optional Pluggy account id
+- `limit`: 1 to 200
+
+### `POST /api/pluggy/candidates`
+
+Imports selected staged transactions into the main `Transaction` table.
+
+Body:
+
+```json
+{
+  "ids": ["staged-transaction-id"],
+  "ownership": "joint"
+}
+```
+
+### `PATCH /api/pluggy/candidates`
+
+Ignores or reopens selected staged transactions.
+
+Body:
+
+```json
+{
+  "ids": ["staged-transaction-id"],
+  "ignored": true
+}
+```
+
+### `POST /api/pluggy/webhook`
+
+Receives Pluggy webhook events.
+
+- Public route by path.
+- If `PLUGGY_WEBHOOK_SECRET` is set, requires the same value through `x-pluggy-webhook-secret`, `x-webhook-secret`, bearer token, or `?secret=`.
+- Current implementation acknowledges and logs the event; imports remain review-first.

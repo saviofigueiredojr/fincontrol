@@ -113,3 +113,16 @@ The next natural improvements are less about adding features and more about shar
 3. formalize shared DTOs for API responses consumed by the frontend
 4. isolate card/statement orchestration into a single module instead of route + helper split
 5. add more integration coverage for import, recurring and month-close flows
+
+### `src/modules/pluggy`
+
+Owns Pluggy / Meu Pluggy integration concerns:
+
+- API authentication and key caching
+- item/account/bill/transaction synchronization
+- staging imported bank data before it reaches the main budget
+- account-to-credit-card linking
+- duplicate hints before manual import
+- selected transaction import into `Transaction`
+
+This module intentionally keeps the integration review-first: external banking data is stored in `Pluggy*` tables and only becomes a real budget transaction after explicit user action.

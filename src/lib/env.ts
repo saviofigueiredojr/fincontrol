@@ -18,6 +18,12 @@ const envSchema = z.object({
   TELEGRAM_ALLOWED_CHAT_IDS: z.string().min(1).optional(),
   TELEGRAM_CHAT_OWNERSHIP_MAP: z.string().min(1).optional(),
   TELEGRAM_ACTOR_EMAIL: z.string().email().optional(),
+  PLUGGY_CLIENT_ID: z.string().min(1).optional(),
+  PLUGGY_CLIENT_SECRET: z.string().min(1).optional(),
+  PLUGGY_ENV: z.enum(["sandbox", "production", "development"]).optional(),
+  PLUGGY_BASE_URL: z.string().url().optional(),
+  PLUGGY_ITEM_IDS: z.string().min(1).optional(),
+  PLUGGY_WEBHOOK_SECRET: z.string().min(16).optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -30,6 +36,12 @@ const parsedEnv = envSchema.safeParse({
   TELEGRAM_ALLOWED_CHAT_IDS: process.env.TELEGRAM_ALLOWED_CHAT_IDS,
   TELEGRAM_CHAT_OWNERSHIP_MAP: process.env.TELEGRAM_CHAT_OWNERSHIP_MAP,
   TELEGRAM_ACTOR_EMAIL: process.env.TELEGRAM_ACTOR_EMAIL,
+  PLUGGY_CLIENT_ID: process.env.PLUGGY_CLIENT_ID,
+  PLUGGY_CLIENT_SECRET: process.env.PLUGGY_CLIENT_SECRET,
+  PLUGGY_ENV: process.env.PLUGGY_ENV,
+  PLUGGY_BASE_URL: process.env.PLUGGY_BASE_URL,
+  PLUGGY_ITEM_IDS: process.env.PLUGGY_ITEM_IDS,
+  PLUGGY_WEBHOOK_SECRET: process.env.PLUGGY_WEBHOOK_SECRET,
 });
 
 if (!parsedEnv.success) {
