@@ -35,6 +35,7 @@ CRON_SECRET=
 
 `NEXTAUTH_URL` deve apontar para a URL final do projeto no Vercel.
 `CRON_SECRET` e necessario para habilitar `/api/cron/pj-retainers`. Sem ele, a rota falha fechada por seguranca.
+O mesmo segredo protege `/api/cron/health`, executado diariamente pela Vercel para verificar o PostgreSQL e manter atividade no projeto Supabase Free.
 
 ## Supabase + Vercel
 
@@ -81,6 +82,7 @@ Evite usar a conexao direta `db.<project-ref>.supabase.co:5432` no Vercel quando
 - seed nunca rodado em producao
 - primeiros logins testados apos o deploy
 - se usar cron, `CRON_SECRET` configurado e enviado no header `Authorization`
+- confirme em **Settings > Cron Jobs** que `/api/cron/health` esta ativo apos o deploy
 - se o repo principal for publico, o Vercel deve apontar para o espelho privado
 
 ## Variaveis opcionais Pluggy
